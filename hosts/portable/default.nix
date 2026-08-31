@@ -3,7 +3,7 @@ let
   happWayland = pkgs.happ.overrideAttrs (old: {
     buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtwayland ];
     qtWrapperArgs = (old.qtWrapperArgs or [ ]) ++ [
-      "--set-default"
+      "--set"
       "QT_QPA_PLATFORM"
       "wayland"
       "--prefix"
