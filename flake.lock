@@ -20,26 +20,6 @@
         "type": "github"
       }
     },
-    "happ-nix": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1787863180,
-        "narHash": "sha256-x+qbITj/Xkivh3lcV1TakRzC1PGSsHYlo5Poq5BCUjY=",
-        "owner": "DaHL-gh",
-        "repo": "happ-nix",
-        "rev": "17f142ef150e764f5d43256c25515bd20993c304",
-        "type": "github"
-      },
-      "original": {
-        "owner": "DaHL-gh",
-        "repo": "happ-nix",
-        "type": "github"
-      }
-    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -76,7 +56,6 @@
     "root": {
       "inputs": {
         "driftwm": "driftwm",
-        "happ-nix": "happ-nix",
         "home-manager": "home-manager",
         "nixpkgs": "nixpkgs"
       }

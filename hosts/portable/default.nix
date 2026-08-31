@@ -1,18 +1,4 @@
-{ pkgs, ... }:
-let
-  happWayland = pkgs.happ.overrideAttrs (old: {
-    buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtwayland ];
-    qtWrapperArgs = (old.qtWrapperArgs or [ ]) ++ [
-      "--set"
-      "QT_QPA_PLATFORM"
-      "wayland"
-      "--prefix"
-      "LD_LIBRARY_PATH"
-      ":"
-      "/run/opengl-driver/lib"
-    ];
-  });
-in
+{ ... }:
 {
   imports = [
     ./storage.nix
@@ -25,11 +11,14 @@ in
 
   networking.hostName = "portable";
 
-  programs.happ = {
+  programs.clash-verge = {
     enable = true;
-    package = happWayland;
-    tunMode.enable = true;
+    serviceMode = true;
+    tunMode = true;
+    group = "networkmanager";
   };
+
+  networking.firewall.trustedInterfaces = [ "Mihomo" ];
 
   users.mutableUsers = true;
   users.users = {
