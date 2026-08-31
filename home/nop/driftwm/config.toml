@@ -1,0 +1,21 @@
+autostart = [
+  "waybar",
+  "mako",
+  "nm-applet --indicator",
+  "blueman-applet",
+  "lxqt-policykit-agent",
+  "swayidle -w timeout 300 'swaylock -f -c 111318'"
+]
+
+[session]
+restore_windows = true
+restore_camera = true
+
+[input.keyboard]
+layout = "us,ru"
+options = "grp:win_space_toggle"
+layout_independent = true
+
+[keybindings]
+"mod+l" = "spawn swaylock -f -c 111318"
+"Print" = "spawn grim -g \"$(slurp)\" - | wl-copy"

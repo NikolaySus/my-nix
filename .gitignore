@@ -1,0 +1,28 @@
+result
+result-*
+*.qcow2
+*.raw
+
+# Nix build outputs
+result
+result-*
+*.qcow2
+*.raw
+*.iso
+
+# direnv
+.direnv/
+
+# Codex local state, logs, and possible credentials
+.codex/
+.codex-log/
+
+# Local environment files
+.env
+.env.local
+
+# Editor/runtime leftovers
+*.swp
+*.swo
+*~
+
