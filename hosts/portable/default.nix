@@ -1,4 +1,18 @@
-{ ... }:
+{ pkgs, ... }:
+let
+  happWayland = pkgs.happ.overrideAttrs (old: {
+    buildInputs = (old.buildInputs or [ ]) ++ [ pkgs.qt6.qtwayland ];
+    qtWrapperArgs = (old.qtWrapperArgs or [ ]) ++ [
+      "--set-default"
+      "QT_QPA_PLATFORM"
+      "wayland"
+      "--prefix"
+      "LD_LIBRARY_PATH"
+      ":"
+      "/run/opengl-driver/lib"
+    ];
+  });
+in
 {
   imports = [
     ./storage.nix
@@ -13,6 +27,7 @@
 
   programs.happ = {
     enable = true;
+    package = happWayland;
     tunMode.enable = true;
   };
 
