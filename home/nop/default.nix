@@ -12,6 +12,7 @@
     };
     packages = with pkgs; [
       blueman
+      codex
       curl
       file
       firefox
@@ -22,6 +23,7 @@
       ripgrep
       rsync
       tree
+      telegram-desktop
       unzip
       wget
       zip
@@ -32,7 +34,10 @@
 
   programs.git = {
     enable = true;
-    settings.init.defaultBranch = "main";
+    settings = {
+      init.defaultBranch = "main";
+      include.path = "~/.gitconfig.local";
+    };
   };
 
   programs.neovim = {

@@ -11,6 +11,11 @@
 
   networking.hostName = "portable";
 
+  programs.happ = {
+    enable = true;
+    tunMode.enable = true;
+  };
+
   users.mutableUsers = true;
   users.users = {
     root.hashedPassword = "!";

@@ -16,6 +16,11 @@
       url = "github:malbiruk/driftwm";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    happ-nix = {
+      url = "github:DaHL-gh/happ-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -24,6 +29,7 @@
       nixpkgs,
       home-manager,
       driftwm,
+      happ-nix,
       ...
     }:
     let
@@ -36,6 +42,7 @@
         specialArgs = { inherit inputs; };
         modules = [
           driftwm.nixosModules.default
+          happ-nix.nixosModules.default
           home-manager.nixosModules.home-manager
           ./hosts/portable
         ];
