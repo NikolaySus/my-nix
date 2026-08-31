@@ -7,6 +7,8 @@ autostart = [
   "swayidle -w timeout 300 'swaylock -f -c 111318'"
 ]
 
+window_placement = "auto"
+
 [session]
 restore_windows = true
 restore_camera = true

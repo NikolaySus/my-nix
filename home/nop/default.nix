@@ -114,5 +114,10 @@
     };
   };
 
-  xdg.configFile."driftwm/config.toml".source = ./driftwm/config.toml;
+  xdg.configFile = {
+    "driftwm/config.toml".source = ./driftwm/config.toml;
+    "xfce4/helpers.rc".text = ''
+      TerminalEmulator=foot
+    '';
+  };
 }
