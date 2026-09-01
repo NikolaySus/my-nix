@@ -67,6 +67,31 @@ in
 
   programs.home-manager.enable = true;
 
+  gtk = {
+    enable = true;
+    colorScheme = "dark";
+    theme = {
+      name = "Adwaita-dark";
+      package = pkgs.gnome-themes-extra;
+    };
+    iconTheme = {
+      name = "Adwaita";
+      package = pkgs.adwaita-icon-theme;
+    };
+  };
+
+  dconf.settings."org/gnome/desktop/interface" = {
+    color-scheme = "prefer-dark";
+    gtk-theme = "Adwaita-dark";
+    icon-theme = "Adwaita";
+  };
+
+  qt = {
+    enable = true;
+    platformTheme.name = "adwaita";
+    style.name = "adwaita-dark";
+  };
+
   programs.git = {
     enable = true;
     settings = {

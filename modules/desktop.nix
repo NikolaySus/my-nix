@@ -6,6 +6,12 @@ in
 {
   programs.driftwm.enable = true;
   programs.xwayland.enable = true;
+  programs.dconf.enable = true;
+
+  xdg.portal.extraPortals = with pkgs; [
+    xdg-desktop-portal-gtk
+    xdg-desktop-portal-wlr
+  ];
 
   services.greetd = {
     enable = true;
