@@ -123,15 +123,22 @@ in
     settings = {
       main.font = "JetBrainsMono Nerd Font:size=11";
       scrollback.lines = 10000;
+      colors-dark = {
+        background = "19191e";
+        alpha = 0.85;
+      };
     };
   };
 
   programs.fuzzel = {
     enable = true;
-    settings.main = {
-      terminal = "foot";
-      layer = "overlay";
-      width = 50;
+    settings = {
+      main = {
+        terminal = "foot";
+        layer = "overlay";
+        width = 50;
+      };
+      colors.background = "19191ed9";
     };
   };
 
@@ -170,7 +177,7 @@ in
     };
     style = ''
       * { font-family: "JetBrainsMono Nerd Font"; font-size: 12px; }
-      window#waybar { background: rgba(25, 25, 30, 0.92); color: #eeeeee; }
+      window#waybar { background: rgba(25, 25, 30, 0.85); color: #eeeeee; }
       #taskbar, #clock, #network, #pulseaudio, #battery, #tray { padding: 0 8px; }
     '';
   };
@@ -178,6 +185,7 @@ in
   services.mako = {
     enable = true;
     settings = {
+      background-color = "#19191ED9";
       default-timeout = 5000;
       border-radius = 6;
       border-size = 2;
@@ -189,6 +197,23 @@ in
   xdg.configFile = {
     "driftwm/config.toml".source = ./driftwm/config.toml;
     "driftwm/shaders/glslsandbox-108166.glsl".source = ./driftwm/shaders/glslsandbox-108166.glsl;
+    "gtk-3.0/gtk.css".text = ''
+      /* Keep transparency scoped to Thunar; other GTK applications use the theme unchanged. */
+      window.thunar,
+      window.thunar:backdrop {
+        background-color: rgba(25, 25, 30, 0.85);
+      }
+
+      .thunar .view,
+      .thunar .view:backdrop,
+      .thunar .sidebar,
+      .thunar .sidebar:backdrop,
+      .thunar .standard-view .view,
+      .thunar .standard-view .view:backdrop {
+        background-color: transparent;
+        background-image: none;
+      }
+    '';
     "kanshi/config".text = ''
       profile auto-scale {
         ...output "*" mode preferred
