@@ -1,7 +1,6 @@
 autostart = [
   "waybar",
   "mako",
-  "blueman-applet",
   "lxqt-policykit-agent",
   "swayidle -w timeout 300 'swaylock -f -c 111318'"
 ]

@@ -82,6 +82,8 @@ The generic profile intentionally does not enable NixOS's NVIDIA module. If an N
 - DriftWM uses US and Russian layouts; `Super+Space` switches layouts.
 - `Super+L` locks with swaylock, `Super+Return` opens Foot, and `Super+D` opens Fuzzel.
 - Waybar, Mako, NetworkManager/Bluetooth applets, and a Polkit agent start with DriftWM.
+- `bluetooth-pair-by-name "DEVICE NAME"` scans for an exact, case-insensitive
+  Bluetooth name, then interactively pairs, trusts, and connects it.
 - Clash Verge Rev provides Mihomo profiles, system proxying, and system-wide TUN mode through a hardened NixOS service.
 - Suspend, hibernate, hybrid sleep, and suspend-then-hibernate are disabled. There is no persistent swap or resume device; zram is used under memory pressure.
 - SSH is disabled. Wi-Fi credentials and the desktop keyring live only on the encrypted system.

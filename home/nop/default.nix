@@ -1,6 +1,11 @@
 { pkgs, ... }:
 let
   yufi = pkgs.callPackage ../../packages/yufi.nix { };
+  bluetoothPairByName = pkgs.writeShellApplication {
+    name = "bluetooth-pair-by-name";
+    runtimeInputs = with pkgs; [ bluez ];
+    text = builtins.readFile ../../scripts/bluetooth-pair-by-name.sh;
+  };
   autoOutputScale = pkgs.writeShellApplication {
     name = "auto-output-scale";
     runtimeInputs = with pkgs; [
@@ -47,6 +52,7 @@ in
     };
     packages = with pkgs; [
       blueman
+      bluetoothPairByName
       codex
       curl
       file
