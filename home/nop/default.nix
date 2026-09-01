@@ -198,20 +198,75 @@ in
     "driftwm/config.toml".source = ./driftwm/config.toml;
     "driftwm/shaders/glslsandbox-108166.glsl".source = ./driftwm/shaders/glslsandbox-108166.glsl;
     "gtk-3.0/gtk.css".text = ''
-      /* Keep transparency scoped to Thunar; other GTK applications use the theme unchanged. */
-      window.thunar,
-      window.thunar:backdrop {
+      /* Draw alpha once at the window root; content views reveal that layer. */
+      window.background,
+      window.background:backdrop {
         background-color: rgba(25, 25, 30, 0.85);
       }
 
-      .thunar .view,
-      .thunar .view:backdrop,
-      .thunar .sidebar,
-      .thunar .sidebar:backdrop,
-      .thunar .standard-view .view,
-      .thunar .standard-view .view:backdrop {
+      .view,
+      .view:backdrop,
+      .sidebar,
+      .sidebar:backdrop,
+      iconview,
+      iconview:backdrop,
+      treeview.view,
+      treeview.view:backdrop,
+      notebook > stack,
+      notebook > stack:backdrop,
+      viewport,
+      viewport:backdrop,
+      textview text,
+      textview text:backdrop {
         background-color: transparent;
         background-image: none;
+      }
+
+      .sidebar row:hover:not(:selected),
+      treeview.view:hover:not(:selected),
+      notebook > header > tabs > tab:hover:not(:checked),
+      menu menuitem:hover,
+      popover modelbutton:hover,
+      combobox window.popup treeview.view:hover:not(:selected) {
+        background-color: rgba(25, 25, 30, 0.95);
+      }
+    '';
+    "gtk-4.0/gtk.css".text = ''
+      /* GTK4 equivalents for YuFi, Wdisplays, and portal dialogs. */
+      window.background,
+      window.background:backdrop {
+        background-color: rgba(25, 25, 30, 0.85);
+      }
+
+      .view,
+      .view:backdrop,
+      .sidebar,
+      .sidebar:backdrop,
+      listview,
+      listview:backdrop,
+      gridview,
+      gridview:backdrop,
+      columnview,
+      columnview:backdrop,
+      notebook > stack,
+      notebook > stack:backdrop,
+      viewport,
+      viewport:backdrop,
+      textview text,
+      textview text:backdrop {
+        background-color: transparent;
+        background-image: none;
+      }
+
+      .sidebar row:hover:not(:selected),
+      listview > row:hover:not(:selected),
+      gridview > child:hover:not(:selected),
+      columnview row:hover:not(:selected),
+      notebook > header > tabs > tab:hover:not(:checked),
+      popover contents row:hover:not(:selected),
+      popover modelbutton:hover,
+      dropdown > popover listview > row:hover:not(:selected) {
+        background-color: rgba(25, 25, 30, 0.95);
       }
     '';
     "kanshi/config".text = ''
