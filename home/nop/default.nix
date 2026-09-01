@@ -120,9 +120,12 @@ in
       ];
       clock.format = "{:%a %Y-%m-%d %H:%M}";
       network = {
-        format-wifi = "{essid} {signalStrength}%";
-        format-ethernet = "{ipaddr}/{cidr}";
-        format-disconnected = "offline";
+        format-wifi = "󰖩  {essid} {signalStrength}%";
+        format-ethernet = "󰈀  {ipaddr}/{cidr}";
+        format-disconnected = "󰖪  offline";
+        tooltip-format = "{ifname}: {ipaddr}/{cidr}";
+        tooltip-format-wifi = "{essid} ({signalStrength}%)\n{ifname}: {ipaddr}/{cidr}";
+        tooltip-format-disconnected = "Network disconnected";
         on-click = "${yufi}/bin/yufi";
       };
       pulseaudio = {
