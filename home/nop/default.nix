@@ -182,6 +182,7 @@ in
 
   xdg.configFile = {
     "driftwm/config.toml".source = ./driftwm/config.toml;
+    "driftwm/shaders/glslsandbox-108166.glsl".source = ./driftwm/shaders/glslsandbox-108166.glsl;
     "kanshi/config".text = ''
       profile auto-scale {
         ...output "*" mode preferred

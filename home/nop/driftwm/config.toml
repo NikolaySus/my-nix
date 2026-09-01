@@ -8,6 +8,11 @@ autostart = [
 
 window_placement = "auto"
 
+[background]
+type = "shader"
+path = "~/.config/driftwm/shaders/glslsandbox-108166.glsl"
+animate_fps = 60
+
 [session]
 restore_windows = false
 restore_camera = true
