@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ lib, pkgs, ... }:
 let
   yufi = pkgs.callPackage ../../packages/yufi.nix { };
   bluetoothPairByName = pkgs.writeShellApplication {
@@ -194,7 +194,68 @@ in
 
   services.kanshi.enable = true;
 
+  home.activation.clashVergeTheme = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    verge_config="/home/nop/.local/share/io.github.clash-verge-rev.clash-verge-rev/verge.yaml"
+    theme_css="/home/nop/.config/clash-verge/theme.css"
+
+    if [[ -f "$verge_config" ]]; then
+      run ${pkgs.yq-go}/bin/yq --inplace \
+        '.theme_mode = "dark" | .theme_setting = (.theme_setting // {}) | .theme_setting.css_injection = load_str("'"$theme_css"'")' \
+        "$verge_config"
+    fi
+  '';
+
   xdg.configFile = {
+    "clash-verge/theme.css".text = ''
+      /* Keep the palette in sync with the rest of the desktop. */
+      :root {
+        color-scheme: dark;
+        --desktop-surface: #19191e;
+        --desktop-surface-hover: #24242b;
+        --desktop-text: #eeeeee;
+        --desktop-text-secondary: #b8b8c0;
+      }
+
+      html,
+      body,
+      #root {
+        background-color: var(--desktop-surface) !important;
+        color: var(--desktop-text) !important;
+      }
+
+      /* Clash Verge uses Material UI for cards, navigation and overlays. */
+      .MuiPaper-root,
+      .MuiCard-root,
+      .MuiAppBar-root,
+      .MuiDrawer-paper {
+        background-color: var(--desktop-surface) !important;
+        background-image: none !important;
+      }
+
+      /* Floating content should remain easy to read over the main window. */
+      .MuiDialog-paper,
+      .MuiMenu-paper,
+      .MuiPopover-paper,
+      .MuiTooltip-tooltip,
+      .MuiSnackbarContent-root {
+        background-color: var(--desktop-surface-hover) !important;
+        color: var(--desktop-text) !important;
+      }
+
+      .MuiTypography-colorTextSecondary,
+      .MuiListItemText-secondary,
+      .MuiFormHelperText-root {
+        color: var(--desktop-text-secondary) !important;
+      }
+
+      .MuiButtonBase-root:hover,
+      .MuiListItemButton-root:hover,
+      .MuiMenuItem-root:hover,
+      .MuiTab-root:hover,
+      .MuiTableRow-hover:hover {
+        background-color: var(--desktop-surface-hover) !important;
+      }
+    '';
     "driftwm/config.toml".source = ./driftwm/config.toml;
     "driftwm/shaders/glslsandbox-108166.glsl".source = ./driftwm/shaders/glslsandbox-108166.glsl;
     "gtk-3.0/gtk.css".text = ''
