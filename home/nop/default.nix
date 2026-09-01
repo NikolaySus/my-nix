@@ -1,5 +1,6 @@
 { pkgs, ... }:
 let
+  yufi = pkgs.callPackage ../../packages/yufi.nix { };
   autoOutputScale = pkgs.writeShellApplication {
     name = "auto-output-scale";
     runtimeInputs = with pkgs; [
@@ -52,7 +53,6 @@ in
       firefox
       jq
       lxqt.lxqt-policykit
-      networkmanagerapplet
       pavucontrol
       ripgrep
       rsync
@@ -60,6 +60,7 @@ in
       telegram-desktop
       unzip
       wget
+      yufi
       zip
     ];
   };
@@ -122,6 +123,7 @@ in
         format-wifi = "{essid} {signalStrength}%";
         format-ethernet = "{ipaddr}/{cidr}";
         format-disconnected = "offline";
+        on-click = "${yufi}/bin/yufi";
       };
       pulseaudio = {
         format = "vol {volume}%";

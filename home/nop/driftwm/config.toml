@@ -1,7 +1,6 @@
 autostart = [
   "waybar",
   "mako",
-  "nm-applet --indicator",
   "blueman-applet",
   "lxqt-policykit-agent",
   "swayidle -w timeout 300 'swaylock -f -c 111318'"
@@ -10,7 +9,7 @@ autostart = [
 window_placement = "auto"
 
 [session]
-restore_windows = true
+restore_windows = false
 restore_camera = true
 
 [input.keyboard]
