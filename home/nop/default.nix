@@ -1,4 +1,38 @@
 { pkgs, ... }:
+let
+  autoOutputScale = pkgs.writeShellApplication {
+    name = "auto-output-scale";
+    runtimeInputs = with pkgs; [
+      jq
+      wlr-randr
+    ];
+    text = ''
+      while IFS=$'\t' read -r output height current_scale; do
+        if ((height <= 1600)); then
+          target_scale="1"
+        elif ((height <= 2400)); then
+          target_scale="1.5"
+        elif ((height <= 3200)); then
+          target_scale="2"
+        else
+          target_scale="3"
+        fi
+
+        if [[ "$current_scale" != "$target_scale" ]]; then
+          wlr-randr --output "$output" --scale "$target_scale"
+        fi
+      done < <(
+        wlr-randr --json | jq -r '
+          .[]
+          | select(.enabled)
+          | (.modes[] | select(.current)) as $mode
+          | [.name, $mode.height, .scale]
+          | @tsv
+        '
+      )
+    '';
+  };
+in
 {
   home = {
     username = "nop";
@@ -114,8 +148,16 @@
     };
   };
 
+  services.kanshi.enable = true;
+
   xdg.configFile = {
     "driftwm/config.toml".source = ./driftwm/config.toml;
+    "kanshi/config".text = ''
+      profile auto-scale {
+        ...output "*" mode preferred
+        exec ${autoOutputScale}/bin/auto-output-scale
+      }
+    '';
     "xfce4/helpers.rc".text = ''
       TerminalEmulator=foot
     '';
