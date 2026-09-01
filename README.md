@@ -1,6 +1,6 @@
 # my-nix
 
-Portable, encrypted NixOS configuration for a 2 TB Samsung T7 Shield. The system is a self-contained UEFI daily driver with DriftWM, Home Manager, LUKS2, Btrfs snapshots, a generic Intel/AMD graphics profile, and a modern NVIDIA specialization.
+Portable, encrypted NixOS configuration for a 2 TB Samsung T7 Shield. The system is a self-contained UEFI daily driver with DriftWM, Home Manager, LUKS2, Btrfs snapshots, a generic Intel/AMD graphics profile, a modern dedicated-NVIDIA specialization, and a machine-specific Intel/NVIDIA PRIME-offload specialization.
 
 ## Safety boundary
 
@@ -72,10 +72,41 @@ To deploy a corrected configuration from another Linux installation without form
 2. In firmware settings, enable UEFI boot and disable Secure Boot.
 3. Select the Samsung T7 Shield from the one-time boot menu.
 4. Enter the LUKS passphrase using the US keyboard layout.
-5. On Intel/AMD graphics, boot the ordinary generation. On modern NVIDIA graphics, select its `nvidia` specialization.
+5. Select the GPU entry appropriate for the host, using the table below.
 6. Log in as `nop` through tuigreet and select DriftWM. TTYs remain available with `Ctrl+Alt+F2` and later function keys.
 
-The generic profile intentionally does not enable NixOS's NVIDIA module. If an NVIDIA boot fails, return to GRUB and use the generic entry for TTY recovery. The NVIDIA specialization targets Turing-or-newer GPUs using Nixpkgs's packaged stable driver and open kernel module; legacy NVIDIA and machine-specific PRIME layouts are not included.
+| Boot entry | Use case |
+| --- | --- |
+| Ordinary generation | Intel/AMD graphics, unknown hardware, or recovery |
+| `nvidia` | Dedicated NVIDIA graphics or a laptop switched to dGPU-only mode in firmware |
+| `nvidia-intel-offload` | The current ASUS laptop with Intel `00:02.0` and NVIDIA `01:00.0` |
+
+The generic profile intentionally does not enable NixOS's NVIDIA module. If an NVIDIA boot fails, return to GRUB and use the generic entry for TTY recovery. Both NVIDIA specializations target Turing-or-newer GPUs using Nixpkgs's packaged stable driver and open kernel module.
+
+The PRIME bus IDs in `nvidia-intel-offload` are machine-specific. Do not select it on another hybrid laptop until `lspci -D -d ::03xx` confirms Intel at `0000:00:02.0` and NVIDIA at `0000:01:00.0`. In that profile, Intel renders DriftWM and ordinary applications while the NVIDIA GPU can runtime-suspend until requested.
+
+Run graphics applications on NVIDIA with:
+
+```bash
+nvidia-offload blender
+nvidia-offload vulkaninfo --summary
+nvidia-offload steam
+```
+
+For one Steam game, use `nvidia-offload gamemoderun %command%` as its launch option; prefix it with `MANGOHUD=1` to show MangoHud. CUDA programs select NVIDIA independently and do not need `nvidia-offload`. The hybrid profile includes CUDA 12.9 and its compiler, but ML frameworks should remain in project-specific development environments.
+
+After booting the hybrid profile, validate the renderer and compute stack with:
+
+```bash
+glxinfo -B | grep -E 'OpenGL vendor|OpenGL renderer'
+nvidia-offload glxinfo -B | grep -E 'OpenGL vendor|OpenGL renderer'
+nvidia-smi
+nvcc --version
+```
+
+The first command should report Intel and the offloaded command should report NVIDIA. To check whether the idle GPU suspended, first close NVIDIA workloads and then read `/sys/bus/pci/devices/0000:01:00.0/power/runtime_status`; querying `nvidia-smi` can wake it.
+
+The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appear to be wired to NVIDIA. PRIME sync and reverse sync are not available as equivalent solutions under native Wayland. If an external display is unavailable in offload mode, switch the firmware MUX to dGPU-only mode when supported and boot the `nvidia` entry.
 
 ## Desktop behavior
 
@@ -97,6 +128,12 @@ cd ~/Projects/my-nix
 nix flake update
 nix flake check
 sudo nixos-rebuild switch --flake .#portable
+```
+
+The `nvidia-intel-offload` closure includes Steam and the full CUDA toolkit, so its first build is large. On a limited connection, defer the download and later install the new boot entries without changing the running system with:
+
+```bash
+sudo nixos-rebuild boot --flake .#portable
 ```
 
 Review upstream changes before committing a new `flake.lock`. GRUB keeps ten NixOS generations. Weekly garbage collection removes store objects older than 30 days.

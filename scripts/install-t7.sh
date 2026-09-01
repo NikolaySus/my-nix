@@ -224,7 +224,7 @@ if $UPDATE_EXISTING; then
   exit 0
 fi
 
-echo "Building the complete generic system and NVIDIA specialization before erasing anything..."
+echo "Building the complete generic system and all GPU specializations before erasing anything..."
 SYSTEM_PATH="$(nix --extra-experimental-features "nix-command flakes" build \
   "$REPO_DIR#nixosConfigurations.portable.config.system.build.toplevel" \
   --no-link \
@@ -320,4 +320,5 @@ sudo "$(command -v sync)"
 
 echo "Installation and on-disk verification succeeded."
 echo "Shut this host down, enable UEFI boot and disable Secure Boot, then select the T7 Shield."
-echo "On this NVIDIA desktop, select the 'nvidia' specialization in GRUB."
+echo "In GRUB, use the generic entry for Intel/AMD or recovery, 'nvidia' for dedicated NVIDIA,"
+echo "or 'nvidia-intel-offload' only for the documented Intel + NVIDIA laptop topology."
