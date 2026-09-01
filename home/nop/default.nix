@@ -56,7 +56,6 @@ in
       codex
       curl
       file
-      firefox
       jq
       lxqt.lxqt-policykit
       pavucontrol
@@ -105,6 +104,8 @@ in
       include.path = "~/.gitconfig.local";
     };
   };
+
+  programs.firefox.enable = true;
 
   programs.neovim = {
     enable = true;
@@ -206,6 +207,70 @@ in
   '';
 
   xdg.configFile = {
+    "mozilla/firefox/fp2yv1vq.default/user.js".text = ''
+      user_pref("browser.tabs.allow_transparent_browser", true);
+      user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+      user_pref("widget.transparent-windows", true);
+    '';
+    "mozilla/firefox/fp2yv1vq.default/chrome/userChrome.css".text = ''
+      :root {
+        --desktop-firefox-surface: rgba(25, 25, 30, 0.85);
+      }
+
+      /* The toolbox is one alpha layer; its child toolbars stay transparent. */
+      #navigator-toolbox {
+        background: var(--desktop-firefox-surface) !important;
+      }
+
+      #TabsToolbar,
+      #nav-bar,
+      #PersonalToolbar,
+      #toolbar-menubar {
+        background: transparent !important;
+        background-image: none !important;
+      }
+
+      #sidebar-box,
+      #sidebar,
+      #sidebar-main {
+        background: var(--desktop-firefox-surface) !important;
+        background-image: none !important;
+      }
+
+      #main-window,
+      body {
+        background: transparent !important;
+      }
+    '';
+    "mozilla/firefox/fp2yv1vq.default/chrome/userContent.css".text = ''
+      @-moz-document url-prefix("about:") {
+        html {
+          background-color: rgba(25, 25, 30, 0.85) !important;
+          background-image: none !important;
+        }
+
+        body {
+          background-color: transparent !important;
+          background-image: none !important;
+        }
+      }
+
+      @-moz-document url("about:home"), url("about:newtab") {
+        :root {
+          --newtab-background-color: transparent !important;
+          --newtab-background-color-secondary: rgba(36, 36, 43, 0.95) !important;
+        }
+
+        body,
+        #root,
+        .activity-stream,
+        .outer-wrapper,
+        main {
+          background-color: transparent !important;
+          background-image: none !important;
+        }
+      }
+    '';
     "clash-verge/theme.css".text = ''
       /* Keep the palette in sync with the rest of the desktop. */
       :root {
