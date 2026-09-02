@@ -19,7 +19,7 @@ void main() {
     position *= 4.0 / u_zoom;
 
     for (float i = 0.0; i < 100.0; i += 0.9) {
-        color += 0.001 / abs(
+        float ring_distance = abs(
             length(
                 position
                 + vec2(cos(i / 4.0 + u_time), sin(i * 0.45 + u_time))
@@ -27,7 +27,15 @@ void main() {
             )
             - sin(i + u_time * 0.5) / 60.0
             - 0.01
-        ) * (
+        );
+
+        // Leave the bright ring core untouched, then gently tighten the halo.
+        // Beyond this radius the original inverse-distance glow falls at
+        // roughly distance^-1.45: visible, but less broad than the original.
+        float halo_ratio = 0.006 / max(ring_distance, 0.000001);
+        float halo_falloff = min(1.0, pow(halo_ratio, 0.45));
+
+        color += 0.001 / max(ring_distance, 0.000001) * halo_falloff * (
             1.0
             + cos(
                 i * 0.9
