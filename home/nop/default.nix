@@ -58,6 +58,7 @@ in
       file
       jq
       lxqt.lxqt-policykit
+      microfetch
       pavucontrol
       ripgrep
       rsync
@@ -68,9 +69,16 @@ in
       yufi
       zip
     ];
+    shellAliases = {
+      fastfetch = "microfetch";
+      fetch = "microfetch";
+      mf = "microfetch";
+      neofetch = "microfetch";
+    };
   };
 
   programs.home-manager.enable = true;
+  programs.bash.enable = true;
 
   gtk = {
     enable = true;
