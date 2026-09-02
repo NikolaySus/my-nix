@@ -161,6 +161,8 @@ in
       modules-center = [ "clock" ];
       modules-right = [
         "network"
+        "backlight"
+        "custom/keyboard-layout"
         "pulseaudio"
         "battery"
         "tray"
@@ -175,6 +177,17 @@ in
         tooltip-format-disconnected = "Network disconnected";
         on-click = "${yufi}/bin/yufi";
       };
+      backlight = {
+        format = "󰃠  {percent}%";
+        tooltip-format = "Screen brightness: {percent}%";
+      };
+      "custom/keyboard-layout" = {
+        exec = "driftwm msg subscribe --json | ${pkgs.jq}/bin/jq --unbuffered -r '.State.layout_short'";
+        format = "󰌌  {}";
+        tooltip = false;
+        restart-interval = 1;
+        on-click = "driftwm msg action switch-layout next";
+      };
       pulseaudio = {
         format = "vol {volume}%";
         format-muted = "muted";
@@ -187,7 +200,7 @@ in
     style = ''
       * { font-family: "JetBrainsMono Nerd Font"; font-size: 12px; }
       window#waybar { background: rgba(25, 25, 30, 0.85); color: #eeeeee; }
-      #taskbar, #clock, #network, #pulseaudio, #battery, #tray { padding: 0 8px; }
+      #taskbar, #clock, #network, #backlight, #custom-keyboard-layout, #pulseaudio, #battery, #tray { padding: 0 8px; }
     '';
   };
 
