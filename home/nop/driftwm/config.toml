@@ -2,7 +2,7 @@ autostart = [
   "waybar",
   "mako",
   "lxqt-policykit-agent",
-  "swayidle -w timeout 300 'swaylock -f -c 111318'"
+  "swayidle -w timeout 300 'swaylock -f -c 00000000'"
 ]
 
 window_placement = "auto"
@@ -11,6 +11,7 @@ window_placement = "auto"
 type = "shader"
 path = "~/.config/driftwm/shaders/glslsandbox-108166.glsl"
 animate_fps = 60
+show_on_lock_screen = true
 
 [session]
 restore_windows = false
@@ -22,5 +23,5 @@ options = "grp:win_space_toggle"
 layout_independent = true
 
 [keybindings]
-"mod+l" = "spawn swaylock -f -c 111318"
+"mod+l" = "spawn swaylock -f -c 00000000"
 "Print" = "spawn grim -g \"$(slurp)\" - | wl-copy"

@@ -112,6 +112,10 @@ The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appea
 
 - DriftWM uses US and Russian layouts; `Super+Space` switches layouts.
 - `Super+L` locks with swaylock, `Super+Return` opens Foot, and `Super+D` opens Fuzzel.
+  Swaylock supplies a transparent lock surface, while the pinned DriftWM fork
+  renders the animated canvas background underneath it. DriftWM freezes the
+  camera and zoom for the duration of the lock and never composites ordinary
+  windows or layer-shell surfaces into the lock frame.
 - Waybar, Mako, NetworkManager/Bluetooth applets, and a Polkit agent start with DriftWM.
 - `bluetooth-pair-by-name "DEVICE NAME"` scans for an exact, case-insensitive
   Bluetooth name, then interactively pairs, trusts, and connects it.

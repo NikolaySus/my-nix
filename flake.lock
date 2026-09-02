@@ -7,15 +7,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1787737430,
-        "narHash": "sha256-Ma4Wuv8xmsG1s0qHQ6k67XOkzN2hjRl4DwG4St3rnrY=",
-        "owner": "malbiruk",
+        "lastModified": 1788363068,
+        "narHash": "sha256-NDLp0s4z6TzoyL/AwedjcEKRr+/PXgsKi2Rgqv7MWBA=",
+        "owner": "NikolaySus",
         "repo": "driftwm",
-        "rev": "3386d5c7e94599d38384b7d4f2218471bd827188",
+        "rev": "b93098b6575977d3a83473f1e05c26dd7e00f9d0",
         "type": "github"
       },
       "original": {
-        "owner": "malbiruk",
+        "owner": "NikolaySus",
+        "ref": "lock-background",
         "repo": "driftwm",
         "type": "github"
       }

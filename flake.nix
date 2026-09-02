@@ -13,7 +13,9 @@
     };
 
     driftwm = {
-      url = "github:malbiruk/driftwm";
+      # Fork branch adding secure compositor-rendered backgrounds beneath
+      # transparent ext-session-lock-v1 surfaces.
+      url = "github:NikolaySus/driftwm/lock-background";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
