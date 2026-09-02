@@ -60,6 +60,12 @@
 
     programs = {
       gamemode.enable = true;
+      rog-control-center = {
+        enable = true;
+        # NixOS 26.11 still expects the pre-6.4 desktop filename when
+        # generating autostart entries, so install the renamed file below.
+        autoStart = false;
+      };
       steam.enable = true;
     };
 
@@ -70,6 +76,9 @@
       nvtopPackages.nvidia
       vulkan-tools
     ];
+
+    environment.etc."xdg/autostart/org.opengamingcollective.rog-control-center.desktop".source =
+      "${pkgs.asusctl}/share/applications/org.opengamingcollective.rog-control-center.desktop";
   };
 
   assertions = [
