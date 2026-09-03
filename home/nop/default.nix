@@ -3,7 +3,10 @@ let
   yufi = pkgs.callPackage ../../packages/yufi.nix { };
   bluetoothPairByName = pkgs.writeShellApplication {
     name = "bluetooth-pair-by-name";
-    runtimeInputs = with pkgs; [ bluez ];
+    runtimeInputs = with pkgs; [
+      bluez
+      expect
+    ];
     text = builtins.readFile ../../scripts/bluetooth-pair-by-name.sh;
   };
   autoOutputScale = pkgs.writeShellApplication {
