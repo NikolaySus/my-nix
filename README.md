@@ -100,11 +100,20 @@ After booting the hybrid profile, validate the renderer and compute stack with:
 ```bash
 glxinfo -B | grep -E 'OpenGL vendor|OpenGL renderer'
 nvidia-offload glxinfo -B | grep -E 'OpenGL vendor|OpenGL renderer'
+nvidia-offload glmark2 --size 800x600
 nvidia-smi
 nvcc --version
 ```
 
-The first command should report Intel and the offloaded command should report NVIDIA. To check whether the idle GPU suspended, first close NVIDIA workloads and then read `/sys/bus/pci/devices/0000:01:00.0/power/runtime_status`; querying `nvidia-smi` can wake it.
+The first command should report Intel, the offloaded commands should report
+NVIDIA, and glmark2 should complete with a score instead of a renderer error.
+Use the same size when comparing scores: glmark2 defaults to 800x600, while
+`--fullscreen` uses the panel's native resolution and is substantially heavier
+on HiDPI displays. The score is only a quick functional check, not a reliable
+comparison across different driver versions. To check whether the idle GPU
+suspended, first close NVIDIA workloads and then read
+`/sys/bus/pci/devices/0000:01:00.0/power/runtime_status`; querying `nvidia-smi`
+can wake it.
 
 The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appear to be wired to NVIDIA. PRIME sync and reverse sync are not available as equivalent solutions under native Wayland. If an external display is unavailable in offload mode, switch the firmware MUX to dGPU-only mode when supported and boot the `nvidia` entry.
 

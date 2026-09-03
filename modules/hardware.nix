@@ -71,6 +71,7 @@
 
     environment.systemPackages = with pkgs; [
       cudaPackages.cudatoolkit
+      glmark2
       mangohud
       mesa-demos
       nvtopPackages.nvidia
