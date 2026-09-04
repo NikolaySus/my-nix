@@ -74,9 +74,13 @@
 
   environment.systemPackages = with pkgs; [
     btrfs-progs
+    cargo
+    clippy
     cryptsetup
     git
     pciutils
+    rustc
+    rustfmt
     usbutils
   ];
 }
