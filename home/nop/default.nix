@@ -22,7 +22,6 @@ let
       curl --fail --location --show-error --silent \
         https://raw.githubusercontent.com/openai/codex/main/scripts/install/install.sh \
         --output "$installer"
-      export PATH="$HOME/.local/bin:$PATH"
       CODEX_NON_INTERACTIVE=1 sh "$installer" --release latest
     '';
   };
@@ -99,7 +98,12 @@ in
   };
 
   programs.home-manager.enable = true;
-  programs.bash.enable = true;
+  programs.bash = {
+    enable = true;
+    initExtra = ''
+      export PATH="$HOME/.local/bin:$PATH"
+    '';
+  };
 
   gtk = {
     enable = true;
