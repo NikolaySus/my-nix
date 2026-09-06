@@ -128,6 +128,9 @@ The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appea
 - Waybar, Mako, NetworkManager/Bluetooth applets, and a Polkit agent start with DriftWM.
 - `bluetooth-pair-by-name "DEVICE NAME"` scans for an exact, case-insensitive
   Bluetooth name, then interactively pairs, trusts, and connects it.
+- Codex CLI is installed independently in `~/.local/bin` so its frequent
+  releases do not require a Nix configuration change. Run `codex-update` to
+  install or update to the latest stable release.
 - Clash Verge Rev provides Mihomo profiles, system proxying, and system-wide TUN mode through a hardened NixOS service.
 - Suspend, hibernate, hybrid sleep, and suspend-then-hibernate are disabled. There is no persistent swap or resume device; zram is used under memory pressure.
 - SSH is disabled. Wi-Fi credentials and the desktop keyring live only on the encrypted system.

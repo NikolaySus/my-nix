@@ -121,6 +121,22 @@ EXPECT_EOF
   fi
 else
   echo "The device is already paired."
+  bluetoothctl trust "$address" >/dev/null
+
+  connect_output="$(bluetoothctl connect "$address" 2>&1 || true)"
+  printf '%s\n' "$connect_output"
+  if bluetoothctl info "$address" 2>/dev/null | grep -Eq '^\s*Connected: yes$'; then
+    echo "$device_name is paired, trusted, and connected."
+    exit 0
+  fi
+
+  # This command is explicitly a pairing/repair helper. If an existing bond
+  # cannot connect, replace only that device's local entry; BlueZ may report a
+  # stale key as key-missing, authentication-failed, or even page-timeout.
+  echo "The existing bond cannot connect; removing only its local entry..."
+  bluetoothctl remove "$address"
+  echo "Rediscovering and pairing with a fresh key..."
+  exec "$0" "$device_name"
 fi
 
 bluetoothctl trust "$address"

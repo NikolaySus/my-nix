@@ -9,6 +9,23 @@ let
     ];
     text = builtins.readFile ../../scripts/bluetooth-pair-by-name.sh;
   };
+  codexUpdate = pkgs.writeShellApplication {
+    name = "codex-update";
+    runtimeInputs = with pkgs; [
+      coreutils
+      curl
+    ];
+    text = ''
+      installer="$(mktemp)"
+      trap 'rm -f "$installer"' EXIT
+
+      curl --fail --location --show-error --silent \
+        https://raw.githubusercontent.com/openai/codex/main/scripts/install/install.sh \
+        --output "$installer"
+      export PATH="$HOME/.local/bin:$PATH"
+      CODEX_NON_INTERACTIVE=1 sh "$installer" --release latest
+    '';
+  };
   autoOutputScale = pkgs.writeShellApplication {
     name = "auto-output-scale";
     runtimeInputs = with pkgs; [
@@ -47,6 +64,7 @@ in
     username = "nop";
     homeDirectory = "/home/nop";
     stateVersion = "26.05";
+    sessionPath = [ "$HOME/.local/bin" ];
     sessionVariables = {
       BROWSER = "firefox";
       EDITOR = "nvim";
@@ -56,7 +74,7 @@ in
     packages = with pkgs; [
       blueman
       bluetoothPairByName
-      codex
+      codexUpdate
       curl
       file
       jq
