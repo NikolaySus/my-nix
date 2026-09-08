@@ -85,6 +85,7 @@ in
       tree
       telegram-desktop
       unzip
+      vscodium
       wget
       yufi
       zip

@@ -2,7 +2,7 @@ autostart = [
   "waybar",
   "mako",
   "lxqt-policykit-agent",
-  "swayidle -w timeout 300 'swaylock -f -c 00000000'"
+  "swayidle -w timeout 1800 'swaylock -f -c 00000000'"
 ]
 
 window_placement = "auto"

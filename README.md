@@ -120,7 +120,8 @@ The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appea
 ## Desktop behavior
 
 - DriftWM uses US and Russian layouts; `Super+Space` switches layouts.
-- `Super+L` locks with swaylock, `Super+Return` opens Foot, and `Super+D` opens Fuzzel.
+- The session locks with swaylock after 30 minutes of inactivity. `Super+L`
+  locks immediately, `Super+Return` opens Foot, and `Super+D` opens Fuzzel.
   Swaylock supplies a transparent lock surface, while the pinned DriftWM fork
   renders the animated canvas background underneath it. DriftWM freezes the
   camera and zoom for the duration of the lock and never composites ordinary
