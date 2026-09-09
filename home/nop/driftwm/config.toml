@@ -7,6 +7,12 @@ autostart = [
 
 window_placement = "auto"
 
+[panel]
+autohide = true
+namespace = "waybar"
+edge_size = 3
+hide_delay_ms = 300
+
 [background]
 type = "shader"
 path = "~/.config/driftwm/shaders/glslsandbox-108166.glsl"

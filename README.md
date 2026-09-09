@@ -120,6 +120,12 @@ The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appea
 ## Desktop behavior
 
 - DriftWM uses US and Russian layouts; `Super+Space` switches layouts.
+- Waybar hides by default and overlays windows while Super is held or the
+  pointer touches the top 3 logical pixels of a screen. It stays visible over
+  the panel and its popups, then hides 300 ms after interaction ends. Super
+  reveals all monitors; the pointer reveals only its own monitor. The optional
+  `[panel]` behavior is supplied by `packages/driftwm-panel-autohide.patch`
+  against the pinned DriftWM fork; no separate checkout is needed to rebuild.
 - The session locks with swaylock after 30 minutes of inactivity. `Super+L`
   locks immediately, `Super+Return` opens Foot, and `Super+D` opens Fuzzel.
   Swaylock supplies a transparent lock surface, while the pinned DriftWM fork

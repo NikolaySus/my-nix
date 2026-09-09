@@ -1,10 +1,20 @@
-{ config, pkgs, ... }:
+{
+  config,
+  pkgs,
+  inputs,
+  ...
+}:
 let
   driftwm = config.programs.driftwm.package;
   sessions = config.services.displayManager.sessionData.desktops;
 in
 {
   programs.driftwm.enable = true;
+  programs.driftwm.package =
+    inputs.driftwm.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs
+      (old: {
+        patches = (old.patches or [ ]) ++ [ ../packages/driftwm-panel-autohide.patch ];
+      });
   programs.xwayland.enable = true;
   programs.dconf.enable = true;
 

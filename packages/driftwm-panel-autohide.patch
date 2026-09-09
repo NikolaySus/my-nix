@@ -1,0 +1,480 @@
+diff --git a/config.reference.toml b/config.reference.toml
+index 63dd126..51749cb 100644
+--- a/config.reference.toml
++++ b/config.reference.toml
+@@ -83,6 +83,17 @@
+ # # Example:
+ # # autostart = ["waybar", "swaync"]
+ 
++[panel]
++# # Auto-hide a top-edge layer-shell panel by namespace. Configure the panel
++# # with no exclusive zone and on the overlay layer (Waybar: exclusive=false,
++# # layer="overlay"). Do not set Waybar start_hidden: DriftWM controls drawing
++# # and input while the client stays mapped. Super reveals panels on all outputs;
++# # the top edge reveals only the pointer's output. Popups keep their panel open.
++# autohide = false
++# namespace = "waybar"
++# edge_size = 3  # Top-edge reveal zone in logical pixels, independent of zoom.
++# hide_delay_ms = 300  # Delay after Super and pointer interaction end.
++
+ [session]
+ # # Persist your canvas across restarts. Suspended windows are always saved to
+ # # ~/.local/state/driftwm/session.json; these flags control the rest.
+diff --git a/docs/config.md b/docs/config.md
+index b3c98b7..a5572c0 100644
+--- a/docs/config.md
++++ b/docs/config.md
+@@ -67,6 +67,30 @@ systemctl --user mask xdg-desktop-autostart.target
+ autostart = ["waybar", "swaync"]
+ ```
+ 
++## `[panel]`
++
++### `autohide`
++
++Default: `false`
++
++Auto-hide a top-edge layer-shell panel by namespace. Configure the panel with no exclusive zone and on the overlay layer (Waybar: exclusive=false, layer="overlay"). Do not set Waybar start_hidden: DriftWM controls drawing and input while the client stays mapped. Super reveals panels on all outputs; the top edge reveals only the pointer's output. Popups keep their panel open.
++
++### `namespace`
++
++Default: `"waybar"`
++
++### `edge_size`
++
++Default: `3`
++
++Top-edge reveal zone in logical pixels, independent of zoom.
++
++### `hide_delay_ms`
++
++Default: `300`
++
++Delay after Super and pointer interaction end.
++
+ ## `[session]`
+ 
+ Persist your canvas across restarts. Suspended windows are always saved to ~/.local/state/driftwm/session.json; these flags control the rest.
+diff --git a/src/config/mod.rs b/src/config/mod.rs
+index 538c031..389d4ea 100644
+--- a/src/config/mod.rs
++++ b/src/config/mod.rs
+@@ -158,6 +158,7 @@ pub struct TabletSettings {
+ 
+ #[derive(Debug, PartialEq)]
+ pub struct Config {
++    pub panel: PanelConfig,
+     pub mod_key: ModKey,
+     pub focus_follows_mouse: bool,
+     /// Session persistence: close-to-suspend, window restore, and camera restore.
+@@ -1234,6 +1235,7 @@ impl Config {
+                 .collect(),
+             navigation_bookmarks,
+             autostart: raw.autostart.unwrap_or_default(),
++            panel: raw.panel,
+             env: raw.env,
+             child_env,
+             window_rules,
+diff --git a/src/config/toml.rs b/src/config/toml.rs
+index 8002a83..17f3410 100644
+--- a/src/config/toml.rs
++++ b/src/config/toml.rs
+@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
+ #[derive(Serialize, Deserialize, Default)]
+ #[serde(default, deny_unknown_fields)]
+ pub(super) struct ConfigFile {
++    pub panel: super::PanelConfig,
+     pub mod_key: Option<String>,
+     pub focus_follows_mouse: Option<bool>,
+     pub session: SessionFileConfig,
+diff --git a/src/config/types.rs b/src/config/types.rs
+index b87e669..93b9d05 100644
+--- a/src/config/types.rs
++++ b/src/config/types.rs
+@@ -5,6 +5,27 @@ use std::hash::Hash;
+ use smithay::input::keyboard::{Keysym, ModifiersState};
+ use smithay::utils::Transform;
+ 
++/// Visibility policy for a top-edge layer-shell panel.
++#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
++#[serde(default, deny_unknown_fields)]
++pub struct PanelConfig {
++    pub autohide: bool,
++    pub namespace: String,
++    pub edge_size: u32,
++    pub hide_delay_ms: u32,
++}
++
++impl Default for PanelConfig {
++    fn default() -> Self {
++        Self {
++            autohide: false,
++            namespace: "waybar".into(),
++            edge_size: 3,
++            hide_delay_ms: 300,
++        }
++    }
++}
++
+ pub const BTN_LEFT: u32 = 0x110;
+ pub const BTN_RIGHT: u32 = 0x111;
+ pub const BTN_MIDDLE: u32 = 0x112;
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index cfdd5ee..ff37755 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -416,6 +416,7 @@ impl DriftWm {
+             InputEvent::TabletToolButton { event } => self.on_tablet_tool_button::<I>(event),
+             _ => {}
+         }
++        self.update_panel_visibility(std::time::Instant::now());
+     }
+ 
+     /// Whether any suspended stand-in is on the stage — gates the per-motion
+diff --git a/src/main.rs b/src/main.rs
+index 9bd6a78..eda0186 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -391,6 +391,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
+         },
+     )?;
+ 
++    // Keep hide deadlines running even when the desktop has no animation.
++    event_loop.handle().insert_source(
++        smithay::reexports::calloop::timer::Timer::from_duration(std::time::Duration::from_millis(
++            50,
++        )),
++        |_, _, data: &mut DriftWm| {
++            data.update_panel_visibility(std::time::Instant::now());
++            smithay::reexports::calloop::timer::TimeoutAction::ToDuration(
++                std::time::Duration::from_millis(50),
++            )
++        },
++    )?;
++
+     // After WAYLAND_DISPLAY is set so satellite can connect as a Wayland client.
+     xwayland::setup(&mut data);
+ 
+diff --git a/src/render/lifecycle.rs b/src/render/lifecycle.rs
+index 2fb9e0b..2741373 100644
+--- a/src/render/lifecycle.rs
++++ b/src/render/lifecycle.rs
+@@ -296,8 +296,9 @@ pub fn post_render(state: &mut crate::state::DriftWm, output: &Output) {
+         let output_fullscreen = state.is_output_visually_fullscreen(output);
+         let layer_map = layer_map_for_output(output);
+         for layer_surface in layer_map.layers() {
+-            let on_screen =
+-                !lock_frame && (!output_fullscreen || layer_surface.layer() == WlrLayer::Overlay);
++            let on_screen = !lock_frame
++                && !state.panel_is_hidden(output, layer_surface.namespace())
++                && (!output_fullscreen || layer_surface.layer() == WlrLayer::Overlay);
+             layer_surface.send_frame(
+                 output,
+                 time,
+diff --git a/src/state/init.rs b/src/state/init.rs
+index 6c243ed..66450ff 100644
+--- a/src/state/init.rs
++++ b/src/state/init.rs
+@@ -423,6 +423,7 @@ impl DriftWm {
+             udev_device: None,
+             last_titlebar_click: None,
+             hot_corner_latch: None,
++            panel_visibility: HashMap::new(),
+             pending_click_navigate: None,
+             pending_pick: None,
+             click_navigate_timer: None,
+diff --git a/src/state/layers.rs b/src/state/layers.rs
+index d08ec1b..e22ecc4 100644
+--- a/src/state/layers.rs
++++ b/src/state/layers.rs
+@@ -47,6 +47,7 @@ impl DriftWm {
+             .any(|r| r.layer_order.is_some());
+         let mut surfaces: Vec<_> = map
+             .layers_on(layer)
++            .filter(|s| !self.panel_is_hidden(output, s.namespace()))
+             .enumerate()
+             .map(|(map_idx, s)| {
+                 let order = if has_orders {
+diff --git a/src/state/mod.rs b/src/state/mod.rs
+index 0735d53..36061f1 100644
+--- a/src/state/mod.rs
++++ b/src/state/mod.rs
+@@ -24,6 +24,7 @@ mod layers;
+ mod membership;
+ mod navigation;
+ mod output;
++mod panel;
+ pub mod persistence;
+ mod pinned;
+ pub(crate) use pinned::clamp_pin_frame;
+@@ -1032,6 +1033,7 @@ pub struct DriftWm {
+     /// even when fullscreen/dragging suppresses the action; cleared only when
+     /// the pointer leaves the corner (or that output).
+     pub hot_corner_latch: Option<(Output, HotCorner)>,
++    pub panel_visibility: HashMap<Output, panel::PanelVisibility>,
+ 
+     /// Click armed for auto-navigate on release (see `auto_navigate_on_click`).
+     pub pending_click_navigate: Option<PendingClickNavigate>,
+diff --git a/src/state/reload.rs b/src/state/reload.rs
+index c34f47a..585ec77 100644
+--- a/src/state/reload.rs
++++ b/src/state/reload.rs
+@@ -214,7 +214,10 @@ impl DriftWm {
+             self.session_store_mark_dirty();
+         }
+ 
++        self.panel_visibility.clear();
+         self.config = new_config;
++        self.update_panel_visibility(std::time::Instant::now());
++        self.pending_pointer_resync = true;
+ 
+         // Must stay below the swap: `configure_mouse` and `configure_trackpad`
+         // read `self.config`, so running this any earlier applies the settings
+diff --git a/src/tests/layer_frame_gating.rs b/src/tests/layer_frame_gating.rs
+index f997160..ea4b056 100644
+--- a/src/tests/layer_frame_gating.rs
++++ b/src/tests/layer_frame_gating.rs
+@@ -25,6 +25,86 @@ use crate::state::SessionLock;
+ use super::client::{ClientId, LayerConfigureProps, SyncData};
+ use super::{Fixture, adopt_last_configure, map_window, tick_until_settled};
+ 
++#[test]
++fn autohide_panel_filters_render_and_input_until_super_then_hides_after_delay() {
++    use smithay::wayland::shell::wlr_layer::Layer;
++    use std::time::Instant;
++
++    let mut f = Fixture::with_config(super::config("[panel]\nautohide = true"));
++    let output = f.add_output(1, (1920, 1080));
++    let id = f.add_client();
++    map_layer(
++        &mut f,
++        id,
++        None,
++        zwlr_layer_shell_v1::Layer::Overlay,
++        "waybar",
++    );
++    map_layer(
++        &mut f,
++        id,
++        None,
++        zwlr_layer_shell_v1::Layer::Overlay,
++        "other",
++    );
++    assert_eq!(f.state().layers_on_sorted(&output, Layer::Overlay).len(), 1);
++    let keyboard = f.state().seat.get_keyboard().unwrap();
++    let mut mods = keyboard.modifier_state();
++    mods.logo = true;
++    keyboard.set_modifier_state(mods);
++    let now = Instant::now();
++    f.state().update_panel_visibility(now);
++    assert_eq!(f.state().layers_on_sorted(&output, Layer::Overlay).len(), 2);
++    mods.logo = false;
++    keyboard.set_modifier_state(mods);
++    // Keep the pointer away from both the reveal edge and the panel.
++    f.state()
++        .seat
++        .get_pointer()
++        .unwrap()
++        .set_location((800.0, 800.0).into());
++    f.state().update_panel_visibility(now);
++    assert!(!f.state().panel_is_hidden(&output, "waybar"));
++    f.state()
++        .update_panel_visibility(now + Duration::from_millis(301));
++    assert!(f.state().panel_is_hidden(&output, "waybar"));
++    f.state()
++        .reload_config_from_contents("[panel]\nautohide = false");
++    assert_eq!(f.state().layers_on_sorted(&output, Layer::Overlay).len(), 2);
++    // The headless fixture has no DRM backend to consume reload's mode request.
++    f.state().pending_mode_changes.clear();
++}
++
++#[test]
++fn panel_edge_is_output_local_and_independent_of_canvas_zoom() {
++    use crate::state::output_state;
++    use driftwm::canvas::{ScreenPos, screen_to_canvas};
++    use std::time::Instant;
++
++    let mut f = Fixture::with_config(super::config("[panel]\nautohide = true"));
++    let first = f.add_output(1, (1920, 1080));
++    let second = f.add_output(2, (2560, 1440));
++    f.state().focused_output = Some(second.clone());
++    let (camera, zoom) = {
++        let mut os = output_state(&second);
++        os.camera = (3456.0, -1234.0).into();
++        os.zoom = 0.25;
++        (os.camera, os.zoom)
++    };
++    let pointer = f.state().seat.get_pointer().unwrap();
++    pointer.set_location(screen_to_canvas(ScreenPos((100.0, 2.0).into()), camera, zoom).0);
++    f.state().update_panel_visibility(Instant::now());
++    assert!(f.state().panel_is_hidden(&first, "waybar"));
++    assert!(!f.state().panel_is_hidden(&second, "waybar"));
++    let keyboard = f.state().seat.get_keyboard().unwrap();
++    let mut mods = keyboard.modifier_state();
++    mods.logo = true;
++    keyboard.set_modifier_state(mods);
++    f.state().update_panel_visibility(Instant::now());
++    assert!(!f.state().panel_is_hidden(&first, "waybar"));
++    assert!(!f.state().panel_is_hidden(&second, "waybar"));
++}
++
+ /// Map a layer surface on `layer`, give it a buffer, and settle. Returns the
+ /// client-side surface.
+ fn map_layer(
+diff --git a/src/state/panel.rs b/src/state/panel.rs
+new file mode 100644
+index 0000000..44a08a8
+--- /dev/null
++++ b/src/state/panel.rs
+@@ -0,0 +1,151 @@
++use std::time::{Duration, Instant};
++
++use smithay::desktop::{PopupManager, WindowSurfaceType, layer_map_for_output};
++use smithay::output::Output;
++
++use super::{DriftWm, output_logical_size};
++
++#[derive(Default)]
++pub struct PanelVisibility {
++    visible: bool,
++    hide_at: Option<Instant>,
++}
++
++impl PanelVisibility {
++    fn update(
++        &mut self,
++        now: Instant,
++        reveal: bool,
++        keep: bool,
++        locked: bool,
++        delay: Duration,
++    ) -> bool {
++        let was_visible = self.visible;
++        if locked {
++            self.visible = false;
++            self.hide_at = None;
++        } else if reveal || (self.visible && keep) {
++            self.visible = true;
++            self.hide_at = None;
++        } else if self.visible {
++            let deadline = *self.hide_at.get_or_insert(now + delay);
++            if now >= deadline {
++                self.visible = false;
++                self.hide_at = None;
++            }
++        }
++        was_visible != self.visible
++    }
++}
++
++impl DriftWm {
++    pub(crate) fn panel_is_hidden(&self, output: &Output, namespace: &str) -> bool {
++        self.config.panel.autohide
++            && namespace == self.config.panel.namespace
++            && (self.session_lock.is_locked()
++                || !self.panel_visibility.get(output).is_some_and(|s| s.visible))
++    }
++
++    pub(crate) fn update_panel_visibility(&mut self, now: Instant) {
++        if !self.config.panel.autohide {
++            return;
++        }
++        let locked = self.session_lock.is_locked();
++        let super_held = self
++            .seat
++            .get_keyboard()
++            .is_some_and(|k| k.modifier_state().logo);
++        let active = self.active_output();
++        let screen = self.seat.get_pointer().map(|p| {
++            driftwm::canvas::canvas_to_screen(
++                driftwm::canvas::CanvasPos(p.current_location()),
++                self.camera(),
++                self.zoom(),
++            )
++            .0
++        });
++        let outputs: Vec<_> = self.space.outputs().cloned().collect();
++        self.panel_visibility.retain(|o, _| outputs.contains(o));
++        let mut changed = false;
++        for output in outputs {
++            let pointer = screen
++                .filter(|_| active.as_ref() == Some(&output) && !self.pointer_constraint_locked());
++            let size = output_logical_size(&output);
++            let at_edge = pointer.is_some_and(|p| {
++                p.x >= 0.0
++                    && p.x < size.w as f64
++                    && p.y >= 0.0
++                    && p.y < f64::from(self.config.panel.edge_size.min(32))
++            });
++            let map = layer_map_for_output(&output);
++            let mut keep = false;
++            for surface in map
++                .layers()
++                .filter(|s| s.namespace() == self.config.panel.namespace)
++            {
++                if let Some(geo) = map.layer_geometry(surface) {
++                    keep |= pointer.is_some_and(|p| {
++                        surface
++                            .surface_under(p - geo.loc.to_f64(), WindowSurfaceType::ALL)
++                            .is_some()
++                    });
++                }
++                // A tray menu may extend past the bar or temporarily own a grab.
++                keep |= PopupManager::popups_for_surface(surface.wl_surface())
++                    .next()
++                    .is_some();
++            }
++            drop(map);
++            let visibility = self.panel_visibility.entry(output).or_default();
++            // Preserve a pointer grab begun on the panel until its button release.
++            keep |= visibility.visible && !self.held_buttons.is_empty();
++            changed |= visibility.update(
++                now,
++                super_held || at_edge,
++                keep,
++                locked,
++                Duration::from_millis(u64::from(self.config.panel.hide_delay_ms)),
++            );
++        }
++        if changed {
++            self.mark_all_dirty();
++            self.pending_pointer_resync = true;
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn hidden_panel_does_not_reveal_from_hovering_its_old_rectangle() {
++        let mut panel = PanelVisibility::default();
++        assert!(!panel.update(Instant::now(), false, true, false, Duration::ZERO));
++        assert!(!panel.visible);
++    }
++
++    #[test]
++    fn reveal_and_interaction_cancel_the_pending_hide() {
++        let mut panel = PanelVisibility::default();
++        let now = Instant::now();
++        let delay = Duration::from_millis(300);
++        assert!(panel.update(now, true, false, false, delay));
++        assert!(!panel.update(now, false, false, false, delay));
++        assert!(!panel.update(now + delay / 2, false, true, false, delay));
++        assert!(!panel.update(now + delay, false, false, false, delay));
++        assert!(panel.visible);
++        assert!(panel.update(now + delay * 2, false, false, false, delay));
++        assert!(!panel.visible);
++    }
++
++    #[test]
++    fn lock_hides_immediately_even_while_super_or_menu_is_active() {
++        let mut panel = PanelVisibility::default();
++        let now = Instant::now();
++        panel.update(now, true, false, false, Duration::from_secs(1));
++        assert!(panel.update(now, true, true, true, Duration::from_secs(1)));
++        assert!(!panel.visible);
++        assert!(panel.hide_at.is_none());
++    }
++}

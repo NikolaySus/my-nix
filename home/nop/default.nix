@@ -180,7 +180,8 @@ in
   programs.waybar = {
     enable = true;
     settings.mainBar = {
-      layer = "top";
+      layer = "overlay";
+      exclusive = false;
       position = "top";
       height = 30;
       modules-left = [ "wlr/taskbar" ];
