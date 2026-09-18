@@ -13,7 +13,10 @@ in
   programs.driftwm.package =
     inputs.driftwm.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs
       (old: {
-        patches = (old.patches or [ ]) ++ [ ../packages/driftwm-panel-autohide.patch ];
+        patches = (old.patches or [ ]) ++ [
+          ../packages/driftwm-panel-autohide.patch
+          ../packages/driftwm-background-animation-clock.patch
+        ];
       });
   programs.xwayland.enable = true;
   programs.dconf.enable = true;

@@ -17,6 +17,10 @@ hide_delay_ms = 300
 type = "shader"
 path = "~/.config/driftwm/shaders/glslsandbox-108166.glsl"
 animate_fps = 60
+animation_speed = 1.0
+lock_animation_speed = 0.5
+speed_transition_duration_ms = 1000
+speed_transition_easing = "ease-in-out"
 show_on_lock_screen = true
 
 [session]

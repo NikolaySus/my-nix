@@ -132,6 +132,16 @@ The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appea
   renders the animated canvas background underneath it. DriftWM freezes the
   camera and zoom for the duration of the lock and never composites ordinary
   windows or layer-shell surfaces into the lock frame.
+- Wallpaper animation eases from normal speed to half speed over one second
+  when locking, and back when unlocking; the frame-rate cap stays at 60 FPS.
+  Adjust `[background]` `animation_speed`, `lock_animation_speed`,
+  `speed_transition_duration_ms`, and `speed_transition_easing` in
+  `home/nop/driftwm/config.toml`. Curves: `linear`, `ease-in`, `ease-out`,
+  `ease-in-out`. Zero duration switches speed immediately; zero speed freezes
+  animation time. The fork feature is packaged in
+  `packages/driftwm-background-animation-clock.patch` after the panel patch.
+  Initial installation needs `sudo nixos-rebuild boot --flake .#portable` and
+  a reboot into the desired GPU profile; later setting changes can be reloaded.
 - Waybar, Mako, NetworkManager/Bluetooth applets, and a Polkit agent start with DriftWM.
 - `bluetooth-pair-by-name "DEVICE NAME"` scans for an exact, case-insensitive
   Bluetooth name, then interactively pairs, trusts, and connects it.

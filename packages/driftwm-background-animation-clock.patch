@@ -1,0 +1,692 @@
+diff --git a/config.reference.toml b/config.reference.toml
+index 51749cb..14172bc 100644
+--- a/config.reference.toml
++++ b/config.reference.toml
+@@ -366,6 +366,19 @@
+ # # re-evaluating the shader, so this directly scales the background's GPU cost.
+ # animate_fps = 0
+ 
++# # Shader animation time is independent of the frame-rate cap. Speeds are
++# # finite non-negative multipliers; 0 freezes time. Omitted lock_animation_speed
++# # inherits animation_speed (the value below matches the default normal speed).
++# animation_speed = 1.0
++# lock_animation_speed = 1.0
++# # Shared lock/unlock transition; 0 switches speed immediately, never time.
++# speed_transition_duration_ms = 1000
++# # linear, ease-in, ease-out, ease-in-out (quadratic eased curves).
++# speed_transition_easing = "ease-in-out"
++# # Interrupted transitions start from the current speed. Config reloads retain
++# # animation time; unrelated edits do not restart transitions. All outputs share
++# # one clock, which advances even while the wallpaper is hidden.
++
+ [bindings]
+ # # Opt out of built-in default bindings by category, for a clean slate.
+ # # Normally your [keybindings]/[mouse]/[gestures]/[touch] entries merge with
+diff --git a/docs/config.md b/docs/config.md
+index a5572c0..a287b22 100644
+--- a/docs/config.md
++++ b/docs/config.md
+@@ -728,6 +728,30 @@ Default: `0`
+ 
+ Frame-rate cap (0-1000) for animated (`u_time`) shader backgrounds. 0 = every output frame. Slow-moving shaders look identical well below the refresh rate; between ticks the compositor reuses the composited result instead of re-evaluating the shader, so this directly scales the background's GPU cost.
+ 
++### `animation_speed`
++
++Default: `1.0`
++
++Shader animation time is independent of the frame-rate cap. Speeds are finite non-negative multipliers; 0 freezes time. Omitted lock_animation_speed inherits animation_speed (the value below matches the default normal speed).
++
++### `lock_animation_speed`
++
++Default: `1.0`
++
++### `speed_transition_duration_ms`
++
++Default: `1000`
++
++Shared lock/unlock transition; 0 switches speed immediately, never time.
++
++### `speed_transition_easing`
++
++Default: `"ease-in-out"`
++
++linear, ease-in, ease-out, ease-in-out (quadratic eased curves).
++
++Interrupted transitions start from the current speed. Config reloads retain animation time; unrelated edits do not restart transitions. All outputs share one clock, which advances even while the wallpaper is hidden.
++
+ ## `[bindings]`
+ 
+ ### `disable_defaults`
+diff --git a/docs/shaders.md b/docs/shaders.md
+index f4879a3..b69c266 100644
+--- a/docs/shaders.md
++++ b/docs/shaders.md
+@@ -63,7 +63,7 @@ The result covers the entire output behind all windows.
+ | ---------- | ------- | ----------------------------------------------------------------- |
+ | `u_camera` | `vec2`  | Canvas→screen offset in canvas pixels (viewport's top-left)       |
+ | `u_zoom`   | `float` | Canvas→screen scale (1.0 = unzoomed, >1 zoomed in, <1 zoomed out) |
+-| `u_time`   | `float` | Seconds since compositor start                                    |
++| `u_time`   | `float` | Accumulated animation seconds (configurable speed)                 |
+ 
+ All three are optional — declare only the ones your shader uses.
+ 
+@@ -120,7 +120,7 @@ void main() {
+   See `extras/wallpapers/dot_grid.glsl` for an example. Noise-based shaders
+   using `floor()`/`fract()` internally are naturally resilient since the hash
+   functions wrap.
+-- **Animated shaders**: `u_time` gives seconds since compositor start, enabling
++- **Animated shaders**: `u_time` gives accumulated animation seconds, enabling
+   time-driven animations. driftwm re-renders every frame when a shader uses
+   `u_time`, unless `animate_fps` caps the rate.
+ - **Zoom-aware shaders**: declare `uniform float u_zoom;` to react to viewport
+@@ -158,7 +158,7 @@ Adding a `texture` compiles the shader as a _texture_ shader, whose input set is
+ | `u_output_size`  | `vec2`      | driftwm     | Viewport dimensions in pixels (= output / zoom) |
+ | `u_camera`       | `vec2`      | driftwm     | Canvas→screen offset in canvas pixels           |
+ | `u_zoom`         | `float`     | driftwm     | Canvas→screen scale                             |
+-| `u_time`         | `float`     | driftwm     | Seconds since compositor start                  |
++| `u_time`         | `float`     | driftwm     | Accumulated animation seconds                   |
+ 
+ Notes on the texture path:
+ 
+@@ -236,6 +236,17 @@ Other `[background]` keys, described in full in the
+ | `transparent_shader` | Honor a shader's output alpha (see below).                                                                     |
+ | `cache_budget_mb`    | Memory ceiling (MB) for the bake and gigapixel-TIFF chunk caches. Default 128.                                  |
+ | `animate_fps`        | Frame-rate cap for `u_time` shaders. Default 0 = every output frame.                                            |
++| `animation_speed` | Normal animation-time multiplier; default 1.0. Zero freezes time. |
++| `lock_animation_speed` | Animation-time multiplier while locked; omitted inherits normal speed. |
++| `speed_transition_duration_ms` | Shared lock/unlock speed-transition duration; default 1000 ms, 0 switches instantly. |
++| `speed_transition_easing` | `linear`, `ease-in`, `ease-out`, or `ease-in-out` (default); eased curves are quadratic. |
++
++Speed changes do not change the frame-rate cap. Shader time remains continuous
++through locking, unlocking, shader recreation, and config reloads. Interrupted
++transitions start at the current speed and take the full configured duration.
++All outputs share one clock, which advances even while the background is hidden.
++Invalid negative/non-finite speeds warn and fall back to 1.0 for normal speed,
++or the normal speed for lock speed. Unknown easing names warn and use ease-in-out.
+ 
+ ### When `cache_shader` is safe
+ 
+diff --git a/src/config/mod.rs b/src/config/mod.rs
+index 389d4ea..ad435fa 100644
+--- a/src/config/mod.rs
++++ b/src/config/mod.rs
+@@ -767,7 +767,55 @@ impl Config {
+             );
+         }
+ 
++        let speed = |value: Option<f64>, fallback: f64, field: &str, errors: &mut Warnings| {
++            let value = value.unwrap_or(fallback);
++            if value.is_finite() && value >= 0.0 {
++                value
++            } else {
++                collect_warn(
++                    errors,
++                    format!(
++                        "config: background.{field} must be finite and non-negative, using {fallback}"
++                    ),
++                );
++                fallback
++            }
++        };
++        let animation_speed = speed(
++            raw.background.animation_speed,
++            1.0,
++            "animation_speed",
++            &mut errors,
++        );
++        let lock_speed = speed(
++            raw.background.lock_animation_speed,
++            animation_speed,
++            "lock_animation_speed",
++            &mut errors,
++        );
++        use crate::animation_clock::{AnimationSettings, Easing};
++        let easing = match raw.background.speed_transition_easing.as_deref() {
++            None | Some("ease-in-out") => Easing::EaseInOut,
++            Some("linear") => Easing::Linear,
++            Some("ease-in") => Easing::EaseIn,
++            Some("ease-out") => Easing::EaseOut,
++            Some(other) => {
++                collect_warn(
++                    &mut errors,
++                    format!(
++                        "config: unknown background.speed_transition_easing '{other}', using ease-in-out"
++                    ),
++                );
++                Easing::EaseInOut
++            }
++        };
+         let background = BackgroundConfig {
++            animation: AnimationSettings {
++                speed: animation_speed,
++                lock_speed,
++                duration_ms: raw.background.speed_transition_duration_ms.unwrap_or(1000),
++                easing,
++            },
+             show_on_lock_screen: raw.background.show_on_lock_screen.unwrap_or(false),
+             mirror_tile: raw.background.mirror_tile.unwrap_or(false),
+             cache_shader: raw.background.cache_shader.unwrap_or(false),
+@@ -1394,6 +1442,10 @@ fn resolve_background_kind(
+         transparent_shader: _,
+         cache_budget_mb: _,
+         animate_fps: _,
++        animation_speed: _,
++        lock_animation_speed: _,
++        speed_transition_duration_ms: _,
++        speed_transition_easing: _,
+     } = raw;
+     let texture = texture.as_deref().map(expand_tilde);
+     if let Some(t) = kind.as_deref() {
+diff --git a/src/config/toml.rs b/src/config/toml.rs
+index 17f3410..55bb289 100644
+--- a/src/config/toml.rs
++++ b/src/config/toml.rs
+@@ -253,6 +253,10 @@ pub(super) struct BackgroundFileConfig {
+     pub transparent_shader: Option<bool>,
+     pub cache_budget_mb: Option<u32>,
+     pub animate_fps: Option<u32>,
++    pub animation_speed: Option<f64>,
++    pub lock_animation_speed: Option<f64>,
++    pub speed_transition_duration_ms: Option<u32>,
++    pub speed_transition_easing: Option<String>,
+ }
+ 
+ #[derive(Serialize, Deserialize, Default)]
+diff --git a/src/config/types.rs b/src/config/types.rs
+index 93b9d05..a59b409 100644
+--- a/src/config/types.rs
++++ b/src/config/types.rs
+@@ -1305,6 +1305,7 @@ pub enum BackgroundKind {
+ 
+ #[derive(Clone, Debug, Default, PartialEq)]
+ pub struct BackgroundConfig {
++    pub animation: crate::animation_clock::AnimationSettings,
+     pub kind: BackgroundKind,
+     /// Render this background underneath transparent session-lock surfaces.
+     /// Off by default so existing opaque lock-screen setups are unchanged.
+diff --git a/src/handlers/mod.rs b/src/handlers/mod.rs
+index 1d336ac..0e0a619 100644
+--- a/src/handlers/mod.rs
++++ b/src/handlers/mod.rs
+@@ -1270,6 +1270,7 @@ impl SessionLockHandler for DriftWm {
+                     keep_lock_frames: true,
+                     deadline_token: token,
+                 };
++                self.sync_background_clock();
+                 // The flag only decides what the *next* frame paints, and a
+                 // `Pending` that was showing a static desktop has no redraw
+                 // coming to apply it to.
+@@ -1300,6 +1301,7 @@ impl SessionLockHandler for DriftWm {
+                 || any_output_dark,
+             deadline_token: token,
+         };
++        self.sync_background_clock();
+ 
+         // Kill all transient input/animation state so nothing fires during lock
+         self.gesture_state = None;
+@@ -1433,6 +1435,7 @@ impl SessionLockHandler for DriftWm {
+         .0;
+         pointer.set_location(canvas_pos);
+         self.session_lock = SessionLock::Unlocked;
++        self.sync_background_clock();
+         self.lock_surfaces.clear();
+         self.lock_views.clear();
+         // A finger still down at unlock would otherwise leave its slot
+diff --git a/src/lib.rs b/src/lib.rs
+index 8023f8d..734af17 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,4 @@
++pub mod animation_clock;
+ pub mod canvas;
+ pub mod config;
+ pub mod desktop_entry;
+diff --git a/src/render/background.rs b/src/render/background.rs
+index ec19a93..41e5d72 100644
+--- a/src/render/background.rs
++++ b/src/render/background.rs
+@@ -215,7 +215,7 @@ pub fn update_background_element(
+         camera_moved,
+         zoom_changed,
+         uniforms_stale,
+-        time_secs: state.start_time.elapsed().as_secs_f32(),
++        time_secs: state.background_time(),
+     };
+     if let Some(bg) = state.render.cached_bg.get_mut(&output_name) {
+         bg.update(&frame);
+@@ -635,7 +635,7 @@ fn try_init_textured_shader_bg(
+     let (tex, w, h, _) = load_image_to_texture(renderer, texture)?;
+ 
+     let area = Rectangle::from_size(initial_size);
+-    let time_secs = state.start_time.elapsed().as_secs_f32();
++    let time_secs = state.background_time();
+     let uniforms = vec![
+         Uniform::new("u_camera", (0.0f32, 0.0f32)),
+         Uniform::new("u_time", time_secs),
+@@ -760,7 +760,7 @@ fn init_shader_bg(
+ 
+     let area = Rectangle::from_size(initial_size);
+     let transparent = state.config.background.transparent_shader;
+-    let time_secs = state.start_time.elapsed().as_secs_f32();
++    let time_secs = state.background_time();
+     let elem = PixelShaderElement::new(
+         shader,
+         area,
+@@ -839,7 +839,7 @@ fn init_default_shader_bg(
+ 
+     let area = Rectangle::from_size(initial_size);
+     let transparent = state.config.background.transparent_shader;
+-    let time_secs = state.start_time.elapsed().as_secs_f32();
++    let time_secs = state.background_time();
+     let elem = PixelShaderElement::new(
+         shader,
+         area,
+diff --git a/src/render/shaders.rs b/src/render/shaders.rs
+index 16accca..49463e0 100644
+--- a/src/render/shaders.rs
++++ b/src/render/shaders.rs
+@@ -14,7 +14,7 @@ use super::elements::{OutputRenderElements, corner_round_rect};
+ /// Uniform declarations for background shaders. All three are optional:
+ /// shaders reference only what they need; undeclared uniforms get location -1
+ /// and pushes become silent no-ops (per GL spec). `u_camera` is canvas→screen
+-/// offset, `u_zoom` is the canvas→screen scale, `u_time` is seconds since start.
++/// offset, `u_zoom` is the canvas→screen scale, `u_time` is animation seconds.
+ pub(super) const BG_UNIFORMS: &[UniformName<'static>] = &[
+     UniformName {
+         name: Cow::Borrowed("u_camera"),
+diff --git a/src/state/init.rs b/src/state/init.rs
+index 66450ff..630ed83 100644
+--- a/src/state/init.rs
++++ b/src/state/init.rs
+@@ -268,8 +268,12 @@ impl DriftWm {
+         let autostart = config.autostart.clone();
+         let edge_pan_cursor = config.edge_pan_cursor;
+         let bookmarks = config.navigation_bookmarks.clone();
++        let start_time = Instant::now();
++        let background_clock =
++            driftwm::animation_clock::AnimationClock::new(start_time, config.background.animation);
+         Self {
+-            start_time: Instant::now(),
++            start_time,
++            background_clock,
+             display_handle: dh,
+             loop_handle,
+             loop_signal,
+diff --git a/src/state/mod.rs b/src/state/mod.rs
+index 36061f1..de694ba 100644
+--- a/src/state/mod.rs
++++ b/src/state/mod.rs
+@@ -10,6 +10,7 @@
+ //! grew past 3,000 lines of methods that each had a better home.
+ 
+ mod activation;
++mod background_clock;
+ mod cluster_snapshot;
+ mod cursor;
+ mod edge_pan;
+@@ -586,6 +587,7 @@ pub type PointerDelivery = (FocusTarget, Point<f64, Logical>, Point<f64, Logical
+ /// Central compositor state.
+ pub struct DriftWm {
+     pub start_time: Instant,
++    pub background_clock: driftwm::animation_clock::AnimationClock,
+     pub display_handle: DisplayHandle,
+     pub loop_handle: LoopHandle<'static, DriftWm>,
+     pub loop_signal: LoopSignal,
+diff --git a/src/state/reload.rs b/src/state/reload.rs
+index 585ec77..6f3cf93 100644
+--- a/src/state/reload.rs
++++ b/src/state/reload.rs
+@@ -216,6 +216,7 @@ impl DriftWm {
+ 
+         self.panel_visibility.clear();
+         self.config = new_config;
++        self.sync_background_clock();
+         self.update_panel_visibility(std::time::Instant::now());
+         self.pending_pointer_resync = true;
+ 
+diff --git a/src/tests/session_lock.rs b/src/tests/session_lock.rs
+index ae9da4f..58d0413 100644
+--- a/src/tests/session_lock.rs
++++ b/src/tests/session_lock.rs
+@@ -906,6 +906,42 @@ fn lock_background_view_is_cleared_on_unlock() {
+     assert!(f.state().lock_views.is_empty());
+ }
+ 
++#[test]
++fn background_clock_follows_lock_lifecycle_and_reload_without_resetting() {
++    let text = "[background]\nshow_on_lock_screen = true\nlock_animation_speed = 0.5\nspeed_transition_duration_ms = 1000\n";
++    let mut f = Fixture::with_config(Config::from_toml(text).unwrap());
++    let output = f.add_output(1, (1920, 1080));
++    let id = f.add_client();
++    f.client(id).lock_session();
++    f.roundtrip(id);
++    let future = Instant::now() + Duration::from_secs(10);
++    let expected = f.state().background_clock.sample(future);
++    assert_eq!(expected.1, 0.5);
++
++    confirm_lock(&mut f, id, &output);
++    assert_eq!(f.state().background_clock.sample(future), expected);
++    f.kill_client(id);
++    f.pump(10);
++    assert_eq!(f.state().background_clock.sample(future), expected);
++    let replacement = f.add_client();
++    f.client(replacement).lock_session();
++    f.roundtrip(replacement);
++    confirm_lock(&mut f, replacement, &output);
++    assert_eq!(f.state().background_clock.sample(future), expected);
++
++    f.state().reload_config_from_contents(text);
++    f.state().pending_mode_changes.clear();
++    assert_eq!(f.state().background_clock.sample(future), expected);
++    let before_reload = f.state().background_clock.sample(Instant::now()).0;
++    f.state()
++        .reload_config_from_contents(&text.replace("0.5", "0.25"));
++    f.state().pending_mode_changes.clear();
++    assert!(f.state().background_clock.sample(Instant::now()).0 >= before_reload);
++    assert_eq!(f.state().background_clock.sample(future).1, 0.25);
++    f.state().unlock();
++    assert_eq!(f.state().background_clock.sample(future).1, 1.0);
++}
++
+ /// `new_surface` must refuse a lock surface from any client other than the
+ /// one holding the lock — see the comment on that guard for why smithay's own
+ /// `locked_outputs` check doesn't already cover this.
+diff --git a/tests/config_robustness_test.rs b/tests/config_robustness_test.rs
+index ca8e441..f1422fd 100644
+--- a/tests/config_robustness_test.rs
++++ b/tests/config_robustness_test.rs
+@@ -74,6 +74,10 @@ const FIELDS: &[&str] = &[
+     "enabled",
+     "shadow",
+     "font_size",
++    "animation_speed",
++    "lock_animation_speed",
++    "speed_transition_duration_ms",
++    "speed_transition_easing",
+ ];
+ 
+ fn key() -> impl Strategy<Value = String> {
+diff --git a/src/animation_clock.rs b/src/animation_clock.rs
+new file mode 100644
+index 0000000..6a19e70
+--- /dev/null
++++ b/src/animation_clock.rs
+@@ -0,0 +1,209 @@
++//! Frame-independent wallpaper time, including interruptible speed transitions.
++
++use std::time::Instant;
++
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++pub enum Easing {
++    Linear,
++    EaseIn,
++    EaseOut,
++    #[default]
++    EaseInOut,
++}
++
++impl Easing {
++    fn value(self, x: f64) -> f64 {
++        match self {
++            Self::Linear => x,
++            Self::EaseIn => x * x,
++            Self::EaseOut => x * (2.0 - x),
++            Self::EaseInOut if x < 0.5 => 2.0 * x * x,
++            Self::EaseInOut => 1.0 - 2.0 * (1.0 - x).powi(2),
++        }
++    }
++
++    fn integral(self, x: f64) -> f64 {
++        match self {
++            Self::Linear => x * x / 2.0,
++            Self::EaseIn => x.powi(3) / 3.0,
++            Self::EaseOut => x * x - x.powi(3) / 3.0,
++            Self::EaseInOut if x < 0.5 => 2.0 * x.powi(3) / 3.0,
++            Self::EaseInOut => x - 0.5 + 2.0 * (1.0 - x).powi(3) / 3.0,
++        }
++    }
++}
++
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub struct AnimationSettings {
++    pub speed: f64,
++    pub lock_speed: f64,
++    pub duration_ms: u32,
++    pub easing: Easing,
++}
++
++impl Default for AnimationSettings {
++    fn default() -> Self {
++        Self {
++            speed: 1.0,
++            lock_speed: 1.0,
++            duration_ms: 1000,
++            easing: Easing::default(),
++        }
++    }
++}
++
++#[derive(Debug)]
++pub struct AnimationClock {
++    epoch: Instant,
++    time: f64,
++    from_speed: f64,
++    target_speed: f64,
++    settings: AnimationSettings,
++    locked: bool,
++}
++
++impl AnimationClock {
++    pub fn new(now: Instant, settings: AnimationSettings) -> Self {
++        Self {
++            epoch: now,
++            time: 0.0,
++            from_speed: settings.speed,
++            target_speed: settings.speed,
++            settings,
++            locked: false,
++        }
++    }
++
++    /// Sampling is read-only: extra monitors and screenshots cannot advance time.
++    pub fn sample(&self, now: Instant) -> (f64, f64) {
++        let elapsed = now.saturating_duration_since(self.epoch).as_secs_f64();
++        let duration = f64::from(self.settings.duration_ms) / 1000.0;
++        if duration == 0.0 {
++            return (self.time + elapsed * self.target_speed, self.target_speed);
++        }
++        let transition = elapsed.min(duration);
++        let x = transition / duration;
++        // Weighted endpoint speeds avoid cancellation for deceleration to zero.
++        let weight = duration * self.settings.easing.integral(x);
++        let time = self.time
++            + (transition - weight) * self.from_speed
++            + weight * self.target_speed
++            + (elapsed - transition) * self.target_speed;
++        let blend = self.settings.easing.value(x);
++        (
++            time,
++            (1.0 - blend) * self.from_speed + blend * self.target_speed,
++        )
++    }
++
++    pub fn configure(&mut self, now: Instant, locked: bool, settings: AnimationSettings) {
++        if self.locked == locked && self.settings == settings {
++            return;
++        }
++        let (time, speed) = self.sample(now);
++        self.epoch = now;
++        self.time = time;
++        self.from_speed = speed;
++        self.target_speed = if locked {
++            settings.lock_speed
++        } else {
++            settings.speed
++        };
++        self.settings = settings;
++        self.locked = locked;
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::time::Duration;
++
++    fn close(a: f64, b: f64) {
++        assert!((a - b).abs() < 1e-9, "{a} != {b}");
++    }
++
++    #[test]
++    fn curves_and_integrals() {
++        for (curve, quarter, total) in [
++            (Easing::Linear, 0.25, 0.5),
++            (Easing::EaseIn, 0.0625, 1.0 / 3.0),
++            (Easing::EaseOut, 0.4375, 2.0 / 3.0),
++            (Easing::EaseInOut, 0.125, 0.5),
++        ] {
++            close(curve.value(0.0), 0.0);
++            close(curve.value(0.25), quarter);
++            close(curve.value(1.0), 1.0);
++            close(curve.integral(0.0), 0.0);
++            close(curve.integral(1.0), total);
++            for i in 1..100 {
++                let x = f64::from(i) / 100.0;
++                close(
++                    (curve.integral(x + 1e-6) - curve.integral(x - 1e-6)) / 2e-6,
++                    curve.value(x),
++                );
++            }
++        }
++    }
++
++    #[test]
++    fn clock_is_independent_of_frames_and_outputs() {
++        let now = Instant::now();
++        let mut c = AnimationClock::new(now, AnimationSettings::default());
++        close(c.sample(now + Duration::from_secs(10)).0, 10.0);
++        let settings = AnimationSettings {
++            lock_speed: 0.5,
++            ..AnimationSettings::default()
++        };
++        c.configure(now + Duration::from_secs(10), true, settings);
++        let later = now + Duration::from_secs(3611);
++        let expected = 10.0 + 0.75 + 1800.0;
++        for _ in 0..4 {
++            close(c.sample(later).0, expected);
++        }
++        close(c.sample(later).1, 0.5);
++    }
++
++    #[test]
++    fn interruption_and_reload_preserve_time_and_speed() {
++        let now = Instant::now();
++        let settings = AnimationSettings {
++            lock_speed: 0.0,
++            ..AnimationSettings::default()
++        };
++        let mut c = AnimationClock::new(now, settings);
++        c.configure(now, true, settings);
++        let middle = now + Duration::from_millis(500);
++        let before = c.sample(middle);
++        c.configure(middle, true, settings);
++        close(c.sample(now + Duration::from_secs(1)).1, 0.0);
++        c.configure(middle, false, settings);
++        assert_eq!(c.sample(middle), before);
++        close(c.sample(middle + Duration::from_secs(1)).1, 1.0);
++        let changed = AnimationSettings {
++            speed: 2.0,
++            ..settings
++        };
++        c.configure(middle, false, changed);
++        assert_eq!(c.sample(middle), before);
++        close(c.sample(middle + Duration::from_secs(1)).1, 2.0);
++    }
++
++    #[test]
++    fn immediate_and_eased_freeze_do_not_jump_time() {
++        let now = Instant::now();
++        for duration_ms in [0, 1000] {
++            let settings = AnimationSettings {
++                lock_speed: 0.0,
++                duration_ms,
++                ..AnimationSettings::default()
++            };
++            let mut c = AnimationClock::new(now, settings);
++            c.configure(now + Duration::from_secs(2), true, settings);
++            close(c.sample(now + Duration::from_secs(2)).0, 2.0);
++            let settled = c.sample(now + Duration::from_secs(3));
++            close(settled.0, if duration_ms == 0 { 2.0 } else { 2.5 });
++            assert_eq!(settled, c.sample(now + Duration::from_secs(1000)));
++        }
++    }
++}
+diff --git a/src/state/background_clock.rs b/src/state/background_clock.rs
+new file mode 100644
+index 0000000..d5ac7a1
+--- /dev/null
++++ b/src/state/background_clock.rs
+@@ -0,0 +1,20 @@
++use std::time::Instant;
++
++use super::DriftWm;
++
++impl DriftWm {
++    pub(crate) fn sync_background_clock(&mut self) {
++        self.background_clock.configure(
++            Instant::now(),
++            self.session_lock.is_locked(),
++            self.config.background.animation,
++        );
++    }
++
++    pub(crate) fn background_time(&self) -> f32 {
++        self.background_clock
++            .sample(Instant::now())
++            .0
++            .min(f64::from(f32::MAX)) as f32
++    }
++}
+diff --git a/tests/background_animation_test.rs b/tests/background_animation_test.rs
+new file mode 100644
+index 0000000..a074c6a
+--- /dev/null
++++ b/tests/background_animation_test.rs
+@@ -0,0 +1,37 @@
++use driftwm::animation_clock::{AnimationSettings, Easing};
++use driftwm::config::Config;
++
++#[test]
++fn background_animation_defaults_and_inheritance() {
++    let config = Config::from_toml("").unwrap();
++    assert_eq!(config.background.animation, AnimationSettings::default());
++    let config = Config::from_toml("[background]\nanimation_speed = 2.0").unwrap();
++    assert_eq!(config.background.animation.speed, 2.0);
++    assert_eq!(config.background.animation.lock_speed, 2.0);
++}
++
++#[test]
++fn background_animation_options_and_invalid_values() {
++    for (name, easing) in [
++        ("linear", Easing::Linear),
++        ("ease-in", Easing::EaseIn),
++        ("ease-out", Easing::EaseOut),
++        ("ease-in-out", Easing::EaseInOut),
++    ] {
++        let config = Config::from_toml(&format!("[background]\nanimation_speed = 0.0\nlock_animation_speed = 0.5\nspeed_transition_duration_ms = 0\nspeed_transition_easing = \"{name}\"\n")).unwrap();
++        assert_eq!(
++            config.background.animation,
++            AnimationSettings {
++                speed: 0.0,
++                lock_speed: 0.5,
++                duration_ms: 0,
++                easing
++            }
++        );
++    }
++    for bad in ["-1.0", "nan", "inf", "-inf"] {
++        let (config, warnings) = Config::from_toml_collect(&format!("[background]\nanimation_speed = {bad}\nlock_animation_speed = {bad}\nspeed_transition_easing = \"invalid\"\n")).unwrap();
++        assert_eq!(config.background.animation, AnimationSettings::default());
++        assert_eq!(warnings.len(), 3);
++    }
++}
