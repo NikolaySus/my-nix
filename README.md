@@ -143,6 +143,17 @@ The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appea
   Initial installation needs `sudo nixos-rebuild boot --flake .#portable` and
   a reboot into the desired GPU profile; later setting changes can be reloaded.
 - Waybar, Mako, NetworkManager/Bluetooth applets, and a Polkit agent start with DriftWM.
+- Lock/unlock triggers a 2-second fluorescent effect in the ring wallpaper:
+  a shared 0.4-second opening dip on lock or flare on unlock, then all rings
+  flicker at staggered phases on a 0.7-second cycle. Each dropout reduces
+  brightness by 85%, with a 0.2-second hold and smooth edges. The opening delay
+  applies only once, and the flickering fades out smoothly at the end.
+  Both cores and halos react; the background stays black and opaque. Tune the
+  named constants in `home/nop/driftwm/shaders/glslsandbox-108166.glsl`.
+  DriftWM supplies optional `u_locked` and `u_lock_event_age` uniforms through
+  `packages/driftwm-lock-shader-signals.patch`; effect timing uses real seconds,
+  independently of the existing movement slowdown. Install with a boot rebuild
+  and reboot before loading this shader; an older compositor lacks the signals.
 - `bluetooth-pair-by-name "DEVICE NAME"` scans for an exact, case-insensitive
   Bluetooth name, then interactively pairs, trusts, and connects it.
 - Codex CLI is installed independently in `~/.local/bin` so its frequent

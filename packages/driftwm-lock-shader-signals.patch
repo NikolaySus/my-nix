@@ -1,0 +1,641 @@
+diff --git a/config.reference.toml b/config.reference.toml
+index 14172bc..7d423ac 100644
+--- a/config.reference.toml
++++ b/config.reference.toml
+@@ -341,7 +341,8 @@
+ 
+ # # Bake a heavy static shader to a texture once and pan that, instead of
+ # # recomputing it every frame. Only for shaders that slide rigidly with the
+-# # camera; animated (u_time) and zoom-dependent (u_zoom) ones always render live.
++# # camera; time (u_time), zoom (u_zoom), and lock-signal dependent shaders
++# # (u_locked, u_lock_event_age) always render live. See docs/shaders.md.
+ # cache_shader = false
+ # # Honor a shader's output alpha so transparent pixels reveal whatever sits
+ # # below the background — e.g. a wlr-layer-shell Background surface from an
+diff --git a/docs/config.md b/docs/config.md
+index a287b22..d6f62fc 100644
+--- a/docs/config.md
++++ b/docs/config.md
+@@ -702,7 +702,7 @@ tile mode only: mirror-fold the image (2×2 reflected block) so a non-seamless i
+ 
+ Default: `false`
+ 
+-Bake a heavy static shader to a texture once and pan that, instead of recomputing it every frame. Only for shaders that slide rigidly with the camera; animated (u_time) and zoom-dependent (u_zoom) ones always render live.
++Bake a heavy static shader to a texture once and pan that, instead of recomputing it every frame. Only for shaders that slide rigidly with the camera; time (u_time), zoom (u_zoom), and lock-signal dependent shaders (u_locked, u_lock_event_age) always render live. See docs/shaders.md.
+ 
+ ### `transparent_shader`
+ 
+diff --git a/docs/shaders.md b/docs/shaders.md
+index b69c266..3c7beaa 100644
+--- a/docs/shaders.md
++++ b/docs/shaders.md
+@@ -64,6 +64,8 @@ The result covers the entire output behind all windows.
+ | `u_camera` | `vec2`  | Canvas→screen offset in canvas pixels (viewport's top-left)       |
+ | `u_zoom`   | `float` | Canvas→screen scale (1.0 = unzoomed, >1 zoomed in, <1 zoomed out) |
+ | `u_time`   | `float` | Accumulated animation seconds (configurable speed)                 |
++| `u_locked` | `float` | 1.0 while pending/locked, otherwise 0.0 |
++| `u_lock_event_age` | `float` | Real seconds since the latest lock/unlock event; -1.0 before the first event |
+ 
+ All three are optional — declare only the ones your shader uses.
+ 
+@@ -122,7 +124,7 @@ void main() {
+   functions wrap.
+ - **Animated shaders**: `u_time` gives accumulated animation seconds, enabling
+   time-driven animations. driftwm re-renders every frame when a shader uses
+-  `u_time`, unless `animate_fps` caps the rate.
++  `u_time` or `u_lock_event_age`, unless `animate_fps` caps the rate.
+ - **Zoom-aware shaders**: declare `uniform float u_zoom;` to react to viewport
+   zoom. Common pattern: divide canvas-pixel sizes by `u_zoom` to keep features
+   the same screen size at any zoom level (e.g. `DOT_RADIUS / u_zoom`).
+@@ -159,6 +161,8 @@ Adding a `texture` compiles the shader as a _texture_ shader, whose input set is
+ | `u_camera`       | `vec2`      | driftwm     | Canvas→screen offset in canvas pixels           |
+ | `u_zoom`         | `float`     | driftwm     | Canvas→screen scale                             |
+ | `u_time`         | `float`     | driftwm     | Accumulated animation seconds                   |
++| `u_locked` | `float` | driftwm | 1.0 while pending/locked, otherwise 0.0 |
++| `u_lock_event_age` | `float` | driftwm | Real seconds since the latest lock/unlock event; -1.0 initially |
+ 
+ Notes on the texture path:
+ 
+@@ -248,6 +252,35 @@ All outputs share one clock, which advances even while the background is hidden.
+ Invalid negative/non-finite speeds warn and fall back to 1.0 for normal speed,
+ or the normal speed for lock speed. Unknown easing names warn and use ease-in-out.
+ 
++### Lock/unlock effects
++
++Declare either lock uniform only when needed. `u_locked` changes on an accepted
++lock request (including pending locks), and returns to zero on actual unlock.
++`u_lock_event_age` uses real monotonic time, independent of animation speed.
++Before the first event it is -1.0; a new lock/unlock resets it to zero. Sample it
++to drive a finite effect without remembering prior frames:
++
++```glsl
++uniform float u_locked;
++uniform float u_lock_event_age;
++// Inside main(), after computing color:
++if (u_lock_event_age >= 0.0 && u_lock_event_age < 0.8) {
++    float pulse = 1.0 - smoothstep(0.0, 0.8, u_lock_event_age);
++    color.rgb *= 1.0 + mix(0.25, -0.25, u_locked) * pulse;
++}
++```
++
++Lock confirmation, rejected requests, locker failure/replacement, and config
++reloads do not retrigger events. Shader recreation and new outputs sample the
++same event clock; hidden backgrounds do not replay missed effects. These signals
++never delay locking or expose ordinary windows on the lock screen. Unlock
++effects render behind the restored windows.
++
++State-only shaders redraw on events. Event-age shaders remain animation-scheduled
++while visible at `animate_fps`, even after their own effect has finished: the
++compositor cannot infer an arbitrary shader's duration. Both uniforms disable
++static chunk baking. Existing shaders need no changes.
++
+ ### When `cache_shader` is safe
+ 
+ Baking renders the shader once into a texture and pans that texture, so a heavy
+@@ -260,7 +293,8 @@ vec2 canvas = v_coords * size + u_camera;   // pan shifts the image 1:1
+ ```
+ 
+ Parallax (`u_camera * factor`) bakes wrong: the texture pans 1:1 no matter what
+-factor the shader applied. Shaders reading `u_time` or `u_zoom` are never baked
++factor the shader applied. Shaders reading `u_time`, `u_zoom`, `u_locked`, or
++`u_lock_event_age` are never baked
+ and always render live, so the flag costs nothing there.
+ 
+ ## Transparent backgrounds
+diff --git a/src/animation_clock.rs b/src/animation_clock.rs
+index 6a19e70..5b1e675 100644
+--- a/src/animation_clock.rs
++++ b/src/animation_clock.rs
+@@ -60,6 +60,7 @@ pub struct AnimationClock {
+     target_speed: f64,
+     settings: AnimationSettings,
+     locked: bool,
++    last_lock_event: Option<Instant>,
+ }
+ 
+ impl AnimationClock {
+@@ -71,6 +72,7 @@ impl AnimationClock {
+             target_speed: settings.speed,
+             settings,
+             locked: false,
++            last_lock_event: None,
+         }
+     }
+ 
+@@ -101,6 +103,9 @@ impl AnimationClock {
+             return;
+         }
+         let (time, speed) = self.sample(now);
++        if self.locked != locked {
++            self.last_lock_event = Some(now);
++        }
+         self.epoch = now;
+         self.time = time;
+         self.from_speed = speed;
+@@ -112,6 +117,18 @@ impl AnimationClock {
+         self.settings = settings;
+         self.locked = locked;
+     }
++
++    pub fn last_lock_event(&self) -> Option<Instant> {
++        self.last_lock_event
++    }
++
++    /// Real time, independent of wallpaper speed and renderer lifetime.
++    pub fn lock_signals(&self, now: Instant) -> (f32, f32) {
++        let age = self.last_lock_event.map_or(-1.0, |event| {
++            now.saturating_duration_since(event).as_secs_f32()
++        });
++        (if self.locked { 1.0 } else { 0.0 }, age)
++    }
+ }
+ 
+ #[cfg(test)]
+@@ -146,6 +163,35 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn lock_signals_use_real_time_and_only_state_changes_retrigger() {
++        let now = Instant::now();
++        let settings = AnimationSettings {
++            speed: 0.0,
++            lock_speed: 0.0,
++            ..AnimationSettings::default()
++        };
++        let mut clock = AnimationClock::new(now, settings);
++        assert_eq!(clock.lock_signals(now), (0.0, -1.0));
++        clock.configure(now, true, settings);
++        let later = now + Duration::from_millis(400);
++        assert_eq!(clock.lock_signals(later), (1.0, 0.4));
++        assert_eq!(clock.sample(later).0, 0.0);
++        clock.configure(later, true, AnimationSettings::default());
++        assert_eq!(clock.lock_signals(later), (1.0, 0.4));
++        assert_eq!(clock.last_lock_event(), Some(now));
++        for _ in 0..3 {
++            assert_eq!(clock.lock_signals(later), (1.0, 0.4));
++        }
++        clock.configure(later, false, settings);
++        assert_eq!(clock.lock_signals(later), (0.0, 0.0));
++        clock.configure(later + Duration::from_millis(50), true, settings);
++        assert_eq!(
++            clock.lock_signals(later + Duration::from_secs(2)),
++            (1.0, 1.95)
++        );
++    }
++
+     #[test]
+     fn clock_is_independent_of_frames_and_outputs() {
+         let now = Instant::now();
+diff --git a/src/render/background.rs b/src/render/background.rs
+index 41e5d72..99276a0 100644
+--- a/src/render/background.rs
++++ b/src/render/background.rs
+@@ -84,6 +84,7 @@ struct BgFrame {
+     zoom_changed: bool,
+     uniforms_stale: bool,
+     time_secs: f32,
++    lock_signals: (f32, f32),
+ }
+ 
+ impl BackgroundElement {
+@@ -123,6 +124,8 @@ impl BackgroundElement {
+                     e.update_uniforms(vec![
+                         Uniform::new("u_camera", (f.camera.x as f32, f.camera.y as f32)),
+                         Uniform::new("u_time", f.time_secs),
++                        Uniform::new("u_locked", f.lock_signals.0),
++                        Uniform::new("u_lock_event_age", f.lock_signals.1),
+                         Uniform::new("u_zoom", f.zoom as f32),
+                     ]);
+                 }
+@@ -157,6 +160,8 @@ impl BackgroundElement {
+                     e.update_uniforms(vec![
+                         Uniform::new("u_camera", (f.camera.x as f32, f.camera.y as f32)),
+                         Uniform::new("u_time", f.time_secs),
++                        Uniform::new("u_locked", f.lock_signals.0),
++                        Uniform::new("u_lock_event_age", f.lock_signals.1),
+                         Uniform::new("u_zoom", f.zoom as f32),
+                         Uniform::new("u_output_size", (f.canvas_w as f32, f.canvas_h as f32)),
+                         Uniform::new("u_texture_size", (e.tex_w as f32, e.tex_h as f32)),
+@@ -169,7 +174,7 @@ impl BackgroundElement {
+ 
+ /// Update the cached background element for the current camera/zoom.
+ /// Returns (camera_moved, zoom_changed, animated) for the caller's damage
+-/// logic. `animated` reports whether this call advanced the animation —
++/// logic. `animated` reports an animation tick or a lock-event change —
+ /// callers can't re-check `background_animation_due` afterwards because the
+ /// stamp below has already consumed the tick.
+ pub fn update_background_element(
+@@ -201,7 +206,13 @@ pub fn update_background_element(
+             .background_last_animate
+             .insert(output_name.clone(), std::time::Instant::now());
+     }
+-    let uniforms_stale = (camera_moved && state.render.background_uses_camera)
++    let lock_changed = state.render.background_uses_lock_signals
++        && state.render.background_last_lock_event.insert(
++            output_name.clone(),
++            state.background_clock.last_lock_event(),
++        ) != Some(state.background_clock.last_lock_event());
++    let uniforms_stale = lock_changed
++        || (camera_moved && state.render.background_uses_camera)
+         || (zoom_changed && state.render.background_uses_zoom)
+         || animate_due;
+ 
+@@ -216,11 +227,12 @@ pub fn update_background_element(
+         zoom_changed,
+         uniforms_stale,
+         time_secs: state.background_time(),
++        lock_signals: state.background_lock_signals(),
+     };
+     if let Some(bg) = state.render.cached_bg.get_mut(&output_name) {
+         bg.update(&frame);
+     }
+-    (camera_moved, zoom_changed, animate_due)
++    (camera_moved, zoom_changed, animate_due || lock_changed)
+ }
+ 
+ /// Compile background shader and/or load tile/wallpaper image.
+@@ -297,6 +309,7 @@ pub fn init_background(
+ /// per-frame redraws.
+ fn init_none_bg(state: &mut crate::state::DriftWm, output_name: &str) {
+     state.render.background_is_animated = false;
++    state.render.background_uses_lock_signals = false;
+     state.render.background_uses_camera = false;
+     state.render.background_uses_zoom = false;
+     state.render.cached_bg.insert(
+@@ -377,6 +390,7 @@ fn init_tile_chunks_bg(
+     // flags so a previously-animated shader bg doesn't keep forcing the
+     // background-damage path.
+     state.render.background_is_animated = false;
++    state.render.background_uses_lock_signals = false;
+     state.render.background_uses_camera = false;
+     state.render.background_uses_zoom = false;
+     state
+@@ -426,14 +440,11 @@ fn try_init_shader_chunks(
+         Ok(s) => s,
+         Err(e) => return ShaderBakeOutcome::Failed(format!("background shader '{path}': {e}")),
+     };
+-    // Eligible = rigid function of canvas: u_camera present, no u_time/u_zoom.
++    // Eligible = rigid function of canvas, with no time/zoom/lock dependence.
+     // A no-u_camera shader is screen-fixed (already cheap); baking it into
+     // canvas chunks would make it wrongly scroll. Parallax isn't detectable
+     // here (substring match) and is a documented user footgun — see config docs.
+-    let uses_camera = references_uniform(&src, "vec2", "u_camera");
+-    let animated = references_uniform(&src, "float", "u_time");
+-    let uses_zoom = references_uniform(&src, "float", "u_zoom");
+-    if !uses_camera || animated || uses_zoom {
++    if !shader_can_be_baked(&src) {
+         return ShaderBakeOutcome::Ineligible;
+     }
+ 
+@@ -477,6 +488,7 @@ fn try_init_shader_chunks(
+     // Chunked path manages its own elements + uniforms; clear shader-mode flags
+     // so a prior animated/pan shader doesn't keep forcing the bg-damage path.
+     state.render.background_is_animated = false;
++    state.render.background_uses_lock_signals = false;
+     state.render.background_uses_camera = false;
+     state.render.background_uses_zoom = false;
+     state.render.cached_shader_chunks.insert(
+@@ -592,6 +604,7 @@ fn try_init_texture_bg(
+     // force every-frame redraws or push uniforms into a texture program
+     // that doesn't declare them.
+     state.render.background_is_animated = false;
++    state.render.background_uses_lock_signals = false;
+     state.render.background_uses_camera = false;
+     state.render.background_uses_zoom = false;
+     Ok(())
+@@ -636,9 +649,12 @@ fn try_init_textured_shader_bg(
+ 
+     let area = Rectangle::from_size(initial_size);
+     let time_secs = state.background_time();
++    let lock_signals = state.background_lock_signals();
+     let uniforms = vec![
+         Uniform::new("u_camera", (0.0f32, 0.0f32)),
+         Uniform::new("u_time", time_secs),
++        Uniform::new("u_locked", lock_signals.0),
++        Uniform::new("u_lock_event_age", lock_signals.1),
+         Uniform::new("u_zoom", 1.0f32),
+         Uniform::new(
+             "u_output_size",
+@@ -661,7 +677,8 @@ fn try_init_textured_shader_bg(
+         Kind::Unspecified,
+     );
+ 
+-    state.render.background_is_animated = references_uniform(&src, "float", "u_time");
++    state.render.background_is_animated = shader_is_animated(&src);
++    state.render.background_uses_lock_signals = shader_uses_lock_signals(&src);
+     state.render.background_uses_camera = references_uniform(&src, "vec2", "u_camera");
+     state.render.background_uses_zoom = references_uniform(&src, "float", "u_zoom");
+     state.render.cached_bg.insert(
+@@ -749,7 +766,8 @@ fn init_shader_bg(
+             }
+         };
+ 
+-        state.render.background_is_animated = references_uniform(&shader_source, "float", "u_time");
++        state.render.background_is_animated = shader_is_animated(&shader_source);
++        state.render.background_uses_lock_signals = shader_uses_lock_signals(&shader_source);
+         state.render.background_uses_camera =
+             references_uniform(&shader_source, "vec2", "u_camera");
+         state.render.background_uses_zoom = references_uniform(&shader_source, "float", "u_zoom");
+@@ -761,6 +779,7 @@ fn init_shader_bg(
+     let area = Rectangle::from_size(initial_size);
+     let transparent = state.config.background.transparent_shader;
+     let time_secs = state.background_time();
++    let lock_signals = state.background_lock_signals();
+     let elem = PixelShaderElement::new(
+         shader,
+         area,
+@@ -769,6 +788,8 @@ fn init_shader_bg(
+         vec![
+             Uniform::new("u_camera", (0.0f32, 0.0f32)),
+             Uniform::new("u_time", time_secs),
++            Uniform::new("u_locked", lock_signals.0),
++            Uniform::new("u_lock_event_age", lock_signals.1),
+             Uniform::new("u_zoom", 1.0f32),
+         ],
+         Kind::Unspecified,
+@@ -830,7 +851,8 @@ fn init_default_shader_bg(
+         let compiled = renderer
+             .compile_custom_pixel_shader(src, BG_UNIFORMS)
+             .expect("Default shader must compile");
+-        state.render.background_is_animated = references_uniform(src, "float", "u_time");
++        state.render.background_is_animated = shader_is_animated(src);
++        state.render.background_uses_lock_signals = shader_uses_lock_signals(src);
+         state.render.background_uses_camera = references_uniform(src, "vec2", "u_camera");
+         state.render.background_uses_zoom = references_uniform(src, "float", "u_zoom");
+         state.render.background_shader = Some(compiled.clone());
+@@ -840,6 +862,7 @@ fn init_default_shader_bg(
+     let area = Rectangle::from_size(initial_size);
+     let transparent = state.config.background.transparent_shader;
+     let time_secs = state.background_time();
++    let lock_signals = state.background_lock_signals();
+     let elem = PixelShaderElement::new(
+         shader,
+         area,
+@@ -848,6 +871,8 @@ fn init_default_shader_bg(
+         vec![
+             Uniform::new("u_camera", (0.0f32, 0.0f32)),
+             Uniform::new("u_time", time_secs),
++            Uniform::new("u_locked", lock_signals.0),
++            Uniform::new("u_lock_event_age", lock_signals.1),
+             Uniform::new("u_zoom", 1.0f32),
+         ],
+         Kind::Unspecified,
+@@ -861,8 +886,24 @@ fn init_default_shader_bg(
+     );
+ }
+ 
+-/// True if `src` declares `uniform <type> <name>` (with optional precision
+-/// qualifier). Drives the per-uniform damage gating in `update_background_element`.
++fn shader_can_be_baked(src: &str) -> bool {
++    references_uniform(src, "vec2", "u_camera")
++        && !shader_is_animated(src)
++        && !references_uniform(src, "float", "u_zoom")
++        && !shader_uses_lock_signals(src)
++}
++
++fn shader_is_animated(src: &str) -> bool {
++    references_uniform(src, "float", "u_time")
++        || references_uniform(src, "float", "u_lock_event_age")
++}
++
++fn shader_uses_lock_signals(src: &str) -> bool {
++    references_uniform(src, "float", "u_locked")
++        || references_uniform(src, "float", "u_lock_event_age")
++}
++
++/// True if `src` declares a uniform, with an optional precision qualifier.
+ fn references_uniform(src: &str, type_: &str, name: &str) -> bool {
+     ["", "lowp ", "mediump ", "highp "]
+         .iter()
+@@ -873,6 +914,25 @@ fn references_uniform(src: &str, type_: &str, name: &str) -> bool {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn lock_uniforms_control_animation_and_disallow_static_baking() {
++        let state_only = "uniform highp float u_locked;";
++        let event_only = "uniform float u_lock_event_age;";
++        assert!(shader_uses_lock_signals(state_only));
++        assert!(!shader_is_animated(state_only));
++        assert!(shader_uses_lock_signals(event_only));
++        assert!(shader_is_animated(event_only));
++        assert!(shader_is_animated("uniform float u_time;"));
++        assert!(!shader_uses_lock_signals("uniform float u_time;"));
++        assert!(!shader_is_animated("uniform vec2 u_camera;"));
++        assert!(shader_can_be_baked("uniform vec2 u_camera;"));
++        for signal in [state_only, event_only] {
++            assert!(!shader_can_be_baked(&format!(
++                "uniform vec2 u_camera; {signal}"
++            )));
++        }
++    }
++
+     fn out(w: i32, h: i32) -> Size<i32, Logical> {
+         Size::from((w, h))
+     }
+diff --git a/src/render/shaders.rs b/src/render/shaders.rs
+index 49463e0..89a8886 100644
+--- a/src/render/shaders.rs
++++ b/src/render/shaders.rs
+@@ -11,7 +11,7 @@ use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size};
+ 
+ use super::elements::{OutputRenderElements, corner_round_rect};
+ 
+-/// Uniform declarations for background shaders. All three are optional:
++/// Uniform declarations for background shaders. All are optional:
+ /// shaders reference only what they need; undeclared uniforms get location -1
+ /// and pushes become silent no-ops (per GL spec). `u_camera` is canvas→screen
+ /// offset, `u_zoom` is the canvas→screen scale, `u_time` is animation seconds.
+@@ -24,6 +24,14 @@ pub(super) const BG_UNIFORMS: &[UniformName<'static>] = &[
+         name: Cow::Borrowed("u_time"),
+         type_: UniformType::_1f,
+     },
++    UniformName {
++        name: Cow::Borrowed("u_locked"),
++        type_: UniformType::_1f,
++    },
++    UniformName {
++        name: Cow::Borrowed("u_lock_event_age"),
++        type_: UniformType::_1f,
++    },
+     UniformName {
+         name: Cow::Borrowed("u_zoom"),
+         type_: UniformType::_1f,
+@@ -655,6 +663,14 @@ pub(super) const BG_TEX_UNIFORMS: &[UniformName<'static>] = &[
+         name: Cow::Borrowed("u_time"),
+         type_: UniformType::_1f,
+     },
++    UniformName {
++        name: Cow::Borrowed("u_locked"),
++        type_: UniformType::_1f,
++    },
++    UniformName {
++        name: Cow::Borrowed("u_lock_event_age"),
++        type_: UniformType::_1f,
++    },
+     UniformName {
+         name: Cow::Borrowed("u_zoom"),
+         type_: UniformType::_1f,
+diff --git a/src/state/background_clock.rs b/src/state/background_clock.rs
+index d5ac7a1..bbb5854 100644
+--- a/src/state/background_clock.rs
++++ b/src/state/background_clock.rs
+@@ -3,6 +3,10 @@ use std::time::Instant;
+ use super::DriftWm;
+ 
+ impl DriftWm {
++    pub(crate) fn background_lock_signals(&self) -> (f32, f32) {
++        self.background_clock.lock_signals(Instant::now())
++    }
++
+     pub(crate) fn sync_background_clock(&mut self) {
+         self.background_clock.configure(
+             Instant::now(),
+diff --git a/src/state/mod.rs b/src/state/mod.rs
+index de694ba..bc88afa 100644
+--- a/src/state/mod.rs
++++ b/src/state/mod.rs
+@@ -1375,6 +1375,10 @@ impl DriftWm {
+                 "background_last_animate",
+                 self.render.background_last_animate.len(),
+             ),
++            (
++                "background_last_lock_event",
++                self.render.background_last_lock_event.len(),
++            ),
+         ]
+         .into_iter()
+         .map(|(k, v)| (k.to_string(), v))
+diff --git a/src/state/reload.rs b/src/state/reload.rs
+index 6f3cf93..eba5e95 100644
+--- a/src/state/reload.rs
++++ b/src/state/reload.rs
+@@ -93,6 +93,8 @@ impl DriftWm {
+         // can't force per-frame redraws or push unused uniforms.
+         self.render.background_shader = None;
+         self.render.background_is_animated = false;
++        self.render.background_uses_lock_signals = false;
++        self.render.background_last_lock_event.clear();
+         self.render.background_uses_camera = false;
+         self.render.background_uses_zoom = false;
+         self.render.cached_bg.clear();
+diff --git a/src/state/render_cache.rs b/src/state/render_cache.rs
+index a0bd6f2..64d4b6e 100644
+--- a/src/state/render_cache.rs
++++ b/src/state/render_cache.rs
+@@ -18,8 +18,10 @@ pub struct RenderCache {
+     pub border_shader: Option<GlesPixelProgram>,
+     pub corner_clip_shader: Option<GlesTexProgram>,
+     pub background_shader: Option<GlesPixelProgram>,
+-    /// `u_time` is referenced — drives per-frame redraws.
++    /// `u_time` or `u_lock_event_age` is referenced — drives per-frame redraws.
+     pub background_is_animated: bool,
++    pub background_uses_lock_signals: bool,
++    pub background_last_lock_event: HashMap<String, Option<std::time::Instant>>,
+     /// `u_camera` is referenced — gates camera-driven uniform pushes so a
+     /// shader-mode bg referencing none of u_camera/u_zoom/u_time is as cheap
+     /// as wallpaper mode (no per-frame CommitCounter bumps).
+@@ -91,6 +93,8 @@ impl RenderCache {
+             corner_clip_shader: None,
+             background_shader: None,
+             background_is_animated: false,
++            background_uses_lock_signals: false,
++            background_last_lock_event: HashMap::new(),
+             background_uses_camera: false,
+             background_uses_zoom: false,
+             blur_down_shader: None,
+@@ -175,6 +179,7 @@ impl RenderCache {
+         self.cached_bg.remove(output_name);
+         self.remove_blur_caches(output_name);
+         self.background_last_animate.remove(output_name);
++        self.background_last_lock_event.remove(output_name);
+         self.cached_error_bar.remove(output_name);
+         self.cached_outlines.remove(output_name);
+         self.remove_background_chunks(output_name);
+diff --git a/src/tests/layer_frame_gating.rs b/src/tests/layer_frame_gating.rs
+index ea4b056..b78f403 100644
+--- a/src/tests/layer_frame_gating.rs
++++ b/src/tests/layer_frame_gating.rs
+@@ -25,6 +25,49 @@ use crate::state::SessionLock;
+ use super::client::{ClientId, LayerConfigureProps, SyncData};
+ use super::{Fixture, adopt_last_configure, map_window, tick_until_settled};
+ 
++#[test]
++fn lock_signal_damage_is_per_output_and_does_not_require_animation() {
++    use crate::render::update_background_element;
++    use std::time::Instant;
++    let mut f = Fixture::new();
++    let a = f.add_output(1, (1920, 1080));
++    let b = f.add_output(2, (1920, 1080));
++    f.state().render.background_uses_lock_signals = true;
++    let update = |f: &mut Fixture, output: &Output| {
++        update_background_element(
++            f.state(),
++            output,
++            (0.0, 0.0).into(),
++            1.0,
++            (0.0, 0.0).into(),
++            1.0,
++        )
++        .2
++    };
++    assert!(update(&mut f, &a));
++    assert!(update(&mut f, &b));
++    assert!(!update(&mut f, &a));
++    assert!(!f.state().background_animation_due(&a.name()));
++    let settings = f.state().config.background.animation;
++    f.state()
++        .background_clock
++        .configure(Instant::now(), true, settings);
++    assert!(update(&mut f, &a));
++    assert!(update(&mut f, &b));
++    assert!(!update(&mut f, &b));
++    // Event-age-only shaders must keep ticking, even with a frozen motion clock.
++    f.state().render.background_is_animated = true;
++    f.state().config.background.animate_fps = 60;
++    assert!(f.state().background_animation_due(&a.name()));
++    assert!(update(&mut f, &a));
++    assert!(!f.state().background_animation_due(&a.name()));
++    assert!(f.state().background_animation_due(&b.name()));
++    // Headless outputs have no backend teardown; exercise the production cleanup.
++    f.state().render.remove_output(&a.name());
++    f.state().render.remove_output(&b.name());
++    assert!(f.state().render.background_last_lock_event.is_empty());
++}
++
+ #[test]
+ fn autohide_panel_filters_render_and_input_until_super_then_hides_after_delay() {
+     use smithay::wayland::shell::wlr_layer::Layer;
+diff --git a/src/tests/session_lock.rs b/src/tests/session_lock.rs
+index 58d0413..d110d6b 100644
+--- a/src/tests/session_lock.rs
++++ b/src/tests/session_lock.rs
+@@ -916,6 +916,9 @@ fn background_clock_follows_lock_lifecycle_and_reload_without_resetting() {
+     f.roundtrip(id);
+     let future = Instant::now() + Duration::from_secs(10);
+     let expected = f.state().background_clock.sample(future);
++    let event = f.state().background_clock.last_lock_event();
++    assert!(event.is_some());
++    assert_eq!(f.state().background_clock.lock_signals(future).0, 1.0);
+     assert_eq!(expected.1, 0.5);
+ 
+     confirm_lock(&mut f, id, &output);
+@@ -933,13 +936,17 @@ fn background_clock_follows_lock_lifecycle_and_reload_without_resetting() {
+     f.state().pending_mode_changes.clear();
+     assert_eq!(f.state().background_clock.sample(future), expected);
+     let before_reload = f.state().background_clock.sample(Instant::now()).0;
++    assert_eq!(f.state().background_clock.last_lock_event(), event);
+     f.state()
+         .reload_config_from_contents(&text.replace("0.5", "0.25"));
+     f.state().pending_mode_changes.clear();
+     assert!(f.state().background_clock.sample(Instant::now()).0 >= before_reload);
+     assert_eq!(f.state().background_clock.sample(future).1, 0.25);
++    assert_eq!(f.state().background_clock.last_lock_event(), event);
+     f.state().unlock();
+     assert_eq!(f.state().background_clock.sample(future).1, 1.0);
++    assert_ne!(f.state().background_clock.last_lock_event(), event);
++    assert_eq!(f.state().background_clock.lock_signals(future).0, 0.0);
+ }
+ 
+ /// `new_surface` must refuse a lock surface from any client other than the

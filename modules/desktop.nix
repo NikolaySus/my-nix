@@ -16,6 +16,7 @@ in
         patches = (old.patches or [ ]) ++ [
           ../packages/driftwm-panel-autohide.patch
           ../packages/driftwm-background-animation-clock.patch
+          ../packages/driftwm-lock-shader-signals.patch
         ];
       });
   programs.xwayland.enable = true;
