@@ -163,6 +163,17 @@ The internal panel is wired to Intel, but some HDMI/DisplayPort connectors appea
 - Suspend, hibernate, hybrid sleep, and suspend-then-hibernate are disabled. There is no persistent swap or resume device; zram is used under memory pressure.
 - SSH is disabled. Wi-Fi credentials and the desktop keyring live only on the encrypted system.
 
+## Docker Engine
+
+Docker Engine and its CLI are enabled in all GPU profiles. The daemon starts
+automatically; no Docker Desktop or remote TCP API is configured. User `nop`
+belongs to the `docker` group, which grants root-equivalent access to the host.
+
+After applying the configuration, log out and back in (or reboot) for the new
+group membership, then verify with `docker version` and `docker run --rm hello-world`.
+The latter downloads a small test image. Images, containers, and volumes persist
+under `/var/lib/docker`; automatic pruning is not enabled.
+
 ## Updating and rollback
 
 From the installed system:

@@ -29,6 +29,7 @@
       description = "nop";
       extraGroups = [
         "audio"
+        "docker"
         "input"
         "networkmanager"
         "video"
